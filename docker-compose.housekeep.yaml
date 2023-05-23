@@ -4,17 +4,17 @@ services:
   notify:
     image: "docker.io/falmar/docker-swarm-ec2:notify"
     networks:
-      - hostnet
+      - net
     secrets:
       - source: app_env
         target: /app/config.yaml
     deploy:
       mode: global
-      placement:
-        constraints:
-          - node.role == worker
+#      placement:
+#        constraints:
+#          - node.role == worker
 
 secrets:
   app_env:
     external: true
-    name: app_env2
+    name: slacker_env
