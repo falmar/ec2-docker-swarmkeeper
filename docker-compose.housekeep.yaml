@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  notify:
+    image: "docker.io/falmar/docker-swarm-ec2:notify"
+    networks:
+      - hostnet
+    secrets:
+      - source: app_env
+        target: /app/config.yaml
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == worker
+
+secrets:
+  app_env:
+    external: true
+    name: app_env2
