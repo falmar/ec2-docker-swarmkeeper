@@ -3,9 +3,3 @@ version: "3.8"
 secrets:
   slcaker_env:
     file: ./config.yaml
-
-configs:
-  dockerd_config2:
-    file: ./nginx.conf
-  prom_config2:
-    file: ./prometheous.yaml

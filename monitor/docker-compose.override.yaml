@@ -1,0 +1,7 @@
+version: "3.8"
+
+configs:
+  dockerd_config:
+    file: ./nginx.conf
+  prom_config:
+    file: ./prometheous.yaml

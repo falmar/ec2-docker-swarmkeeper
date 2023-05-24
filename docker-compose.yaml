@@ -2,6 +2,3 @@ version: "3.8"
 
 networks:
   net: {}
-  host:
-    external: true
-    name: host
