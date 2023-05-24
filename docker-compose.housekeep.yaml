@@ -3,14 +3,21 @@ version: "3.8"
 services:
   notify:
     init: true
-    image: "docker.io/falmar/docker-swarm-ec2:notify_2"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    image: "docker.io/falmar/docker-swarm-ec2:notify_0"
     networks:
       - net
     secrets:
       - source: app_env
         target: /app/config.yaml
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
     deploy:
       mode: global
+      restart_policy:
+        condition: any
+        delay: 1s
       placement:
         constraints:
           - node.role == worker

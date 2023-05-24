@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/falmar/docker-swarm-ec2-housekeep/internal/docker"
 	"github.com/spf13/viper"
 	"io"
 	"log"
@@ -34,8 +35,17 @@ func main() {
 
 	log.Println("Started...")
 
+	dkr := docker.NewClient()
+
 	tokenChan := make(chan string)
+	leaveChan := make(chan struct{})
 	var token string
+
+	err := dkr.Ping()
+	if err != nil {
+		log.Fatalf("failed to ping docker: %s\n", err)
+		return
+	}
 
 	go func() {
 		var err error = nil
@@ -75,14 +85,13 @@ func main() {
 
 					log.Println(message)
 					notifySlack(message)
+					leaveChan <- struct{}{}
 
 					break breakLoop
 				}
 
 			}
 		}
-
-		cancel()
 	}()
 
 	go func() {
@@ -105,24 +114,66 @@ func main() {
 
 					log.Println(message)
 					notifySlack(message)
+					leaveChan <- struct{}{}
 
 					break breakLoop
 				}
 			}
 		}
+	}()
 
-		cancel()
+	go func() {
+	breakLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				break breakLoop
+			case <-time.After(5 * time.Second):
+				if token == "" {
+					continue
+				}
+
+				log.Println("Checking for lifecycle status...")
+				status, err := checkForTerminateLifecycleStatus(token)
+
+				if err != nil {
+					log.Printf("Failed to check for lifecycle status... %s\n", err)
+				} else if status != nil {
+					message := fmt.Sprintf("Lifecycle status detected... Status: %s; Time: %s", status.Status, time.Now().Format(time.RFC3339))
+
+					log.Println(message)
+					notifySlack(message)
+
+					leaveChan <- struct{}{}
+
+					break breakLoop
+				}
+			}
+		}
+	}()
+
+	go func() {
+		select {
+		case <-leaveChan:
+			log.Println("Leaving swarm...")
+			notifySlack("Leaving swarm...")
+			err := dkr.LeaveSwarm()
+			if err != nil {
+				log.Printf("Failed to leave swarm... %s\n", err)
+			}
+			notifySlack("Left swarm...")
+
+			done <- struct{}{}
+		}
 	}()
 
 	go func() {
 		<-sigChan
 		log.Println("Received quit signal...")
 
-		cancel()
-	}()
+		// Allow time for the other goroutines to finish
+		time.Sleep(30 * time.Second)
 
-	go func() {
-		<-ctx.Done()
 		done <- struct{}{}
 	}()
 
@@ -153,7 +204,6 @@ func getInstanceToken() (string, error) {
 	endpoint, _ := url.Parse("http://169.254.169.254/latest/api/token")
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-
 	req := &http.Request{
 		Method: "PUT",
 		URL:    endpoint,
@@ -184,9 +234,7 @@ type ASGReBalanceResponse struct {
 func checkForASGReBalance(token string) (*ASGReBalanceResponse, error) {
 	endpoint, _ := url.Parse("http://169.254.169.254/latest/meta-data/events/recommendations/rebalance")
 	header := http.Header{}
-
 	header.Set("X-aws-ec2-metadata-token", token)
-
 	req := &http.Request{
 		Method: "GET",
 		URL:    endpoint,
@@ -223,9 +271,7 @@ type SpotInterruptionResponse struct {
 func checkForSpotInterruption(token string) (*SpotInterruptionResponse, error) {
 	endpoint, _ := url.Parse("http://169.254.169.254/latest/meta-data/spot/instance-action")
 	header := http.Header{}
-
 	header.Set("X-aws-ec2-metadata-token", token)
-
 	req := &http.Request{
 		Method: "GET",
 		URL:    endpoint,
@@ -253,3 +299,49 @@ func checkForSpotInterruption(token string) (*SpotInterruptionResponse, error) {
 
 	return interruption, nil
 }
+
+type LifecycleStatusResponse struct {
+	Status string
+}
+
+func checkForTerminateLifecycleStatus(token string) (*LifecycleStatusResponse, error) {
+	endpoint, _ := url.Parse("http://169.254.169.254/latest/meta-data/autoscaling/target-lifecycle-state")
+	header := http.Header{}
+	header.Set("X-aws-ec2-metadata-token", token)
+	req := &http.Request{
+		Method: "GET",
+		URL:    endpoint,
+		Header: header,
+	}
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, nil
+	} else if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	status := &LifecycleStatusResponse{}
+
+	buffer := make([]byte, 256)
+
+	n, err := resp.Body.Read(buffer)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+
+	status.Status = strings.ToLower(string(buffer[:n]))
+
+	if status.Status != "terminated" {
+		return nil, nil
+	}
+
+	return status, nil
+}
+
+// TODO: Complete the lifecycle hook
