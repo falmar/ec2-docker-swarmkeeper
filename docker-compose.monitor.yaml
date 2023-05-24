@@ -18,7 +18,8 @@ services:
     deploy:
       mode: global
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 1s
   #      placement:
   #        constraints:
   #          - node.role == worker
@@ -40,30 +41,32 @@ services:
     deploy:
       mode: global
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 1s
   #      placement:
   #        constraints:
   #          - node.role == worker
 
-  #  dockerd_exporter:
-  #    image: nginx:alpine
-  #    ports:
-  #      - "9324:9324"
-  #    configs:
-  #      - source: dockerd_config2
-  #        target: /etc/nginx/conf.d/default.conf
-  #    networks:
-  #      - net
-  #    extra_hosts:
-  #      - "host.docker.internal:host-gateway"
-  #    #      - host
-  #    deploy:
-  #      mode: global
-  #      restart_policy:
-  #        condition: on-failure
-  #  #      placement:
-  #  #        constraints:
-  #  #          - node.role == worker
+  dockerd_exporter:
+    image: nginx:alpine
+    ports:
+      - "9324:9324"
+    configs:
+      - source: dockerd_config2
+        target: /etc/nginx/conf.d/default.conf
+    networks:
+      - net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    #      - host
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+        delay: 1s
+  #      placement:
+  #        constraints:
+  #          - node.role == worker
 
   prometheus:
     image: prom/prometheus:v2.44.0
@@ -82,7 +85,8 @@ services:
       - prometheus_data:/prometheus
     deploy:
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 1s
   #      placement:
   #        constraints:
   #          - node.role == manager
@@ -97,7 +101,8 @@ services:
       - grafana_data:/var/lib/grafana
     deploy:
       restart_policy:
-        condition: on-failure
+        condition: any
+        delay: 1s
 
 volumes:
   grafana_data: { }
