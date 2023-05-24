@@ -3,7 +3,7 @@ version: "3.8"
 services:
   notify:
     init: true
-    image: "docker.io/falmar/docker-swarm-ec2:notify_1"
+    image: "docker.io/falmar/docker-swarm-ec2:notify_2"
     networks:
       - net
     secrets:

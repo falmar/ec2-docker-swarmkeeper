@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/spf13/viper"
 	"io"
@@ -34,10 +35,13 @@ func main() {
 	log.Println("Started...")
 
 	tokenChan := make(chan string)
+	var token string
 
 	go func() {
+		var err error = nil
+
 		for {
-			token, err := getInstanceToken()
+			token, err = getInstanceToken()
 			if err != nil {
 				log.Println("Failed to refresh token...")
 				log.Println(err)
@@ -52,14 +56,11 @@ func main() {
 	}()
 
 	go func() {
-		var token string
-
 	breakLoop:
 		for {
 			select {
-			case token = <-tokenChan:
-				log.Println("Received token...")
-				log.Println(token)
+			case <-ctx.Done():
+				break breakLoop
 			case <-time.After(5 * time.Second):
 				if token == "" {
 					continue
@@ -68,8 +69,7 @@ func main() {
 				log.Println("Checking for rebalance...")
 				rebalance, err := checkForASGReBalance(token)
 				if err != nil {
-					log.Println("Failed to check for rebalance...")
-					log.Println(err)
+					log.Printf("failed to check for rebalance... %s\n", err)
 				} else if rebalance != nil {
 					message := fmt.Sprintf("Rebalance detected... Time: %s", rebalance.Time)
 
@@ -79,11 +79,27 @@ func main() {
 					break breakLoop
 				}
 
+			}
+		}
+
+		cancel()
+	}()
+
+	go func() {
+	breakLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				break breakLoop
+			case <-time.After(5 * time.Second):
+				if token == "" {
+					continue
+				}
+
 				log.Println("Checking for spot interruption...")
 				interruption, err := checkForSpotInterruption(token)
 				if err != nil {
-					log.Println("Failed to check for spot interruption...")
-					log.Println(err)
+					log.Printf("Failed to check for spot interruption... %s\n", err)
 				} else if interruption != nil {
 					message := fmt.Sprintf("Spot interruption detected... Action: %s; Time: %s", interruption.Action, interruption.Time)
 
@@ -154,7 +170,7 @@ func getInstanceToken() (string, error) {
 	buf := make([]byte, 256)
 
 	n, err := resp.Body.Read(buf)
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
 	}
 
@@ -181,6 +197,7 @@ func checkForASGReBalance(token string) (*ASGReBalanceResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
 		return nil, nil
@@ -216,10 +233,10 @@ func checkForSpotInterruption(token string) (*SpotInterruptionResponse, error) {
 	}
 
 	resp, err := (&http.Client{}).Do(req)
-
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
 		return nil, nil
