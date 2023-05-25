@@ -5,11 +5,14 @@ services:
     init: true
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    image: "docker.io/falmar/docker-swarm-ec2:notify_0"
+    image: "docker.io/falmar/docker-swarm-ec2:notify_1"
     networks:
       - net
+#      - host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     secrets:
-      - source: app_env
+      - source: slacker_env
         target: /app/config.yaml
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
@@ -23,6 +26,6 @@ services:
           - node.role == worker
 
 secrets:
-  app_env:
+  slacker_env:
     external: true
     name: slacker_env
