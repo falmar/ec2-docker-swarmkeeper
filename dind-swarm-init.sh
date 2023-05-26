@@ -17,7 +17,7 @@ for node in manager worker-1 worker-2 worker-3; do
     -v some-docker-certs-ca:/certs/ca \
     -v some-docker-certs-client:/certs/client \
     $(if [ "$node" == "manager" ]; then echo "-p 2365:2375 -p 2366:2376 -p 2367:2377"; fi) \
-    docker:dind -H 0.0.0.0:2375
+    docker:dind
 
   counter=$((counter+1))
 done
