@@ -1,10 +1,12 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/docker/docker/client"
-	"github.com/falmar/docker-swarm-ec2-housekeep/internal/ec2instance"
+	"github.com/falmar/docker-swarm-ec2-housekeep/internal/docker"
+	"github.com/falmar/docker-swarm-ec2-housekeep/internal/ec2metadata"
 	"github.com/falmar/docker-swarm-ec2-housekeep/internal/slack"
 	"github.com/spf13/cobra"
 	"log"
@@ -19,7 +21,8 @@ func Cmd() *cobra.Command {
 		Use:   "worker",
 		Short: "Worker node",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
 
 			done := make(chan struct{}, 1)
 
@@ -28,12 +31,15 @@ func Cmd() *cobra.Command {
 			signal.Notify(sigChan, syscall.SIGINT)
 			signal.Notify(sigChan, syscall.SIGTERM)
 
-			log.Println("Started...")
+			log.Println("Starting...")
 
-			// 6 hours in sec
-			metadata := ec2instance.NewMetadataService(21600)
+			metadata := ec2metadata.NewService(ec2metadata.DefaultConfig())
 
-			dockerd, err := client.NewClientWithOpts()
+			dockerd, err := client.NewClientWithOpts(
+				client.WithTimeout(5*time.Second),
+				client.WithVersion("v1.42"),
+				client.WithHTTPClient(docker.NewSocketClient()),
+			)
 			if err != nil {
 				return fmt.Errorf("failed to create docker client: %s\n", err)
 			}
@@ -63,9 +69,9 @@ func Cmd() *cobra.Command {
 							log.Printf("failed to get token... %s\n", err)
 						}
 
-						log.Println("Checking for rebalance...")
+						log.Println("Checking for asg re-balance...")
 						rebalance, err := metadata.GetASGReBalance(ctx, token)
-						if errors.Is(err, ec2instance.ErrRebalanceNotFount) {
+						if errors.Is(err, ec2metadata.ErrRebalanceNotFount) {
 							continue
 						} else if err != nil {
 							log.Printf("failed to check for rebalance... %s\n", err)
@@ -128,7 +134,10 @@ func Cmd() *cobra.Command {
 				done <- struct{}{}
 			}()
 
+			log.Println("Started...")
+
 			<-done
+			cancel()
 
 			slack.Notify("Shutting down...")
 			log.Println("Shutting down...")

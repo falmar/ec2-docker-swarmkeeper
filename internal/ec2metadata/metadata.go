@@ -1,4 +1,4 @@
-package ec2instance
+package ec2metadata
 
 import (
 	"context"
@@ -19,28 +19,43 @@ var (
 	ErrInterruptionNotFound = errors.New("spot interruption not found")
 )
 
-var _ MetadataService = &tokenService{}
+var _ Service = &service{}
 
-type MetadataService interface {
+type Service interface {
 	GetToken(ctx context.Context) (string, error)
 	GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error)
 	GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error)
 }
 
-func NewMetadataService(tokenTTL int) MetadataService {
-	return &tokenService{
-		ttl: tokenTTL,
+func DefaultConfig() *MetadataServiceConfig {
+	return &MetadataServiceConfig{
+		TokenTTL: 21600,
+		Host:     "169.254.169.254",
 	}
 }
 
-type tokenService struct {
-	ttl           int
+type MetadataServiceConfig struct {
+	TokenTTL int
+	Host     string
+}
+
+func NewService(cfg *MetadataServiceConfig) Service {
+	return &service{
+		ttl:  cfg.TokenTTL,
+		host: cfg.Host,
+	}
+}
+
+type service struct {
+	ttl  int
+	host string
+
 	token         string
 	lastFetchTime int64
 	mu            sync.RWMutex
 }
 
-func (t *tokenService) GetToken(ctx context.Context) (string, error) {
+func (t *service) GetToken(ctx context.Context) (string, error) {
 	t.mu.Lock()
 
 	if t.token == "" || t.lastFetchTime+int64(t.ttl) < time.Now().Unix() {
@@ -48,7 +63,7 @@ func (t *tokenService) GetToken(ctx context.Context) (string, error) {
 		return t.token, nil
 	}
 
-	endpoint, _ := url.Parse("http://169.254.169.254/latest/api/token")
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/api/token", t.host))
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token-ttl-seconds", strconv.Itoa(t.ttl))
 	req := &http.Request{
@@ -94,8 +109,8 @@ type ASGReBalanceResponse struct {
 	Time time.Time
 }
 
-func (t *tokenService) GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error) {
-	endpoint, _ := url.Parse("http://169.254.169.254/latest/api/token")
+func (t *service) GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error) {
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/api/token", t.host))
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token", token)
 	client := &http.Client{Timeout: 1 * time.Second}
@@ -132,8 +147,8 @@ type SpotInterruptionResponse struct {
 	Time   time.Time `json:"time"`
 }
 
-func (t *tokenService) GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error) {
-	endpoint, _ := url.Parse("http://169.254.169.254/latest/meta-data/spot/instance-action")
+func (t *service) GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error) {
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/meta-data/spot/instance-action", t.host))
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token", token)
 	client := &http.Client{Timeout: 1 * time.Second}

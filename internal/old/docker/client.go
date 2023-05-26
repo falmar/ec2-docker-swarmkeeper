@@ -2,11 +2,9 @@ package docker
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 )
@@ -91,14 +89,4 @@ func (d *docker) LeaveSwarm() error {
 	}
 
 	return fmt.Errorf("unable to leave swarm: %s", c.Message)
-}
-
-func getDockerClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", "/var/run/docker.sock")
-			},
-		},
-	}
 }
