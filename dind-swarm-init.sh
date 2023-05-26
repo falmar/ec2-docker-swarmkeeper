@@ -19,11 +19,11 @@ for node in manager worker-1 worker-2 worker-3; do
     $(if [ "$node" == "manager" ]; then echo "-p 2365:2375 -p 2366:2376 -p 2367:2377"; fi) \
     docker:dind
 
-  counter=$((counter+1))
+  counter=$((counter + 1))
 done
 # wait for containers to start
 echo "Waiting 5s for containers to start..."
-sleep 5;
+sleep 5
 
 # get join token and add workers to swarm
 sudo docker exec manager docker swarm init --advertise-addr 172.28.28.2:2377

@@ -19,15 +19,10 @@ import (
 func Cmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "worker",
-		Short: "Worker node",
+		Short: "Listen for EC2 Spot Interruption and ASG Rebalance events",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
-
-			sigChan := make(chan os.Signal)
-
-			signal.Notify(sigChan, syscall.SIGINT)
-			signal.Notify(sigChan, syscall.SIGTERM)
 
 			log.Println("Starting...")
 
@@ -62,6 +57,10 @@ func Cmd() *cobra.Command {
 			})
 
 			go func() {
+				sigChan := make(chan os.Signal)
+				signal.Notify(sigChan, syscall.SIGINT)
+				signal.Notify(sigChan, syscall.SIGTERM)
+
 				<-sigChan
 				log.Println("Received quit signal...")
 				slack.Notify("Received quit signal...")
