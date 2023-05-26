@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/docker/docker/client"
-	"github.com/falmar/docker-swarm-ec2-housekeep/internal/ec2metadata"
-	"github.com/falmar/docker-swarm-ec2-housekeep/internal/slack"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
 	"time"
 )
 

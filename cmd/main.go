@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"github.com/falmar/docker-swarm-ec2-housekeep/cmd/worker"
+	"github.com/falmar/ec2-docker-swarmkeeper/cmd/worker"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"log"

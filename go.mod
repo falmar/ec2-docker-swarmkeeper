@@ -1,4 +1,4 @@
-module github.com/falmar/docker-swarm-ec2-housekeep
+module github.com/falmar/ec2-docker-swarmkeeper
 
 go 1.19
 
