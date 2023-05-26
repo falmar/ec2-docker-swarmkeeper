@@ -2,12 +2,12 @@ package worker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/docker/docker/client"
 	"github.com/falmar/docker-swarm-ec2-housekeep/internal/docker"
 	"github.com/falmar/docker-swarm-ec2-housekeep/internal/ec2metadata"
 	"github.com/falmar/docker-swarm-ec2-housekeep/internal/slack"
+	node "github.com/falmar/docker-swarm-ec2-housekeep/internal/worker"
 	"github.com/spf13/cobra"
 	"log"
 	"os"
@@ -23,8 +23,6 @@ func Cmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
-
-			done := make(chan struct{}, 1)
 
 			sigChan := make(chan os.Signal)
 
@@ -57,86 +55,29 @@ func Cmd() *cobra.Command {
 				return fmt.Errorf("this is a manager node, not a worker node")
 			}
 
-			go func() {
-			breakLoop:
-				for {
-					select {
-					case <-ctx.Done():
-						break breakLoop
-					case <-time.After(5 * time.Second):
-						token, err := metadata.GetToken(ctx)
-						if err != nil {
-							log.Printf("failed to get token... %s\n", err)
-						}
-
-						log.Println("Checking for asg re-balance...")
-						rebalance, err := metadata.GetASGReBalance(ctx, token)
-						if errors.Is(err, ec2metadata.ErrRebalanceNotFount) {
-							continue
-						} else if err != nil {
-							log.Printf("failed to check for rebalance... %s\n", err)
-							continue
-						}
-
-						message := fmt.Sprintf("Rebalance detected... Time: %s", rebalance.Time)
-						log.Println(message)
-						slack.Notify(message)
-
-						// Notify Manager nodes we gotta go :'( it was fun
-
-						break breakLoop
-					}
-				}
-
-				done <- struct{}{}
-			}()
-
-			go func() {
-			breakLoop:
-				for {
-					select {
-					case <-ctx.Done():
-						break breakLoop
-					case <-time.After(5 * time.Second):
-						token, err := metadata.GetToken(ctx)
-						if err != nil {
-							log.Printf("failed to get token... %s\n", err)
-						}
-
-						log.Println("Checking for spot interruption...")
-						interruption, err := metadata.GetSpotInterruption(ctx, token)
-						if err != nil {
-							log.Printf("Failed to check for spot interruption... %s\n", err)
-							continue
-						}
-
-						message := fmt.Sprintf("Spot interruption detected... Action: %s; Time: %s", interruption.Action, interruption.Time)
-						log.Println(message)
-						slack.Notify(message)
-
-						// Notify Manager nodes we gotta go :'( it was fun
-
-						break breakLoop
-					}
-				}
-
-				done <- struct{}{}
-			}()
+			worker := node.NewWorker(&node.Config{
+				DockerClient:   dockerd,
+				EC2Metadata:    metadata,
+				ListenInterval: 5 * time.Second,
+			})
 
 			go func() {
 				<-sigChan
 				log.Println("Received quit signal...")
 				slack.Notify("Received quit signal...")
 
-				// Allow time for the other goroutines to finish
+				// Allow time for the worker node fetch from metadata service
 				time.Sleep(30 * time.Second)
 
-				done <- struct{}{}
+				cancel()
 			}()
 
 			log.Println("Started...")
 
-			<-done
+			if err := worker.Listen(ctx); err != nil {
+				slack.Notify(fmt.Sprintf("worker node error: %s", err))
+				return fmt.Errorf("failed to listen: %s\n", err)
+			}
 			cancel()
 
 			slack.Notify("Shutting down...")
