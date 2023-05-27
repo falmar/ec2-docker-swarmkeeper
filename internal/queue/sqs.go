@@ -2,10 +2,10 @@ package queue
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"strconv"
 	"time"
 )
 
@@ -35,19 +35,20 @@ func NewSQSQueue(cfg *SQSConfig) Queue {
 }
 
 func (q *sqsQueue) Push(ctx context.Context, event *Event) error {
-	b, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-
-	_, err = q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
-		MessageBody: aws.String(string(b)),
+	_, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
+		MessageBody: aws.String(string(event.Data)),
 		MessageAttributes: map[string]types.MessageAttributeValue{
+			"id": {
+				DataType:    aws.String("String"),
+				StringValue: aws.String(event.ID),
+			},
 			"name": {
 				DataType:    aws.String("String"),
 				StringValue: aws.String(string(event.Name)),
 			},
 		},
+		MessageDeduplicationId: aws.String(event.ID),
+		MessageGroupId:         aws.String(string(event.Name)),
 	})
 	if err != nil {
 		return err
@@ -62,8 +63,16 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 	resp, err := q.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(q.queueURL),
 		MaxNumberOfMessages: int32(size),
-		WaitTimeSeconds:     int32(q.pollInterval.Seconds()),
-		VisibilityTimeout:   int32(q.visibilityTimeout.Seconds()),
+		AttributeNames: []types.QueueAttributeName{
+			"MessageDeduplicationId",
+			"ApproximateReceiveCount",
+		},
+		MessageAttributeNames: []string{
+			"id",
+			"name",
+		},
+		VisibilityTimeout: int32(q.visibilityTimeout.Seconds()),
+		WaitTimeSeconds:   int32(q.pollInterval.Seconds()),
 	})
 	if err != nil {
 		return nil, err
@@ -76,22 +85,21 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 	var events []*Event
 
 	for _, msg := range resp.Messages {
+		var retries int
+
+		if msg.Attributes["ApproximateReceiveCount"] != "" {
+			retries, _ = strconv.Atoi(msg.Attributes["ApproximateReceiveCount"])
+		}
+
 		events = append(events, &Event{
-			ID:   *msg.MessageId,
-			Name: EventName(*msg.MessageAttributes["name"].StringValue),
-			Data: *msg.Body,
+			sqsMessageId: aws.ToString(msg.MessageId),
+
+			ID:         msg.Attributes["MessageDeduplicationId"],
+			Name:       EventName(aws.ToString(msg.MessageAttributes["name"].StringValue)),
+			Data:       []byte(aws.ToString(msg.Body)),
+			RetryCount: retries,
 		})
 	}
-
-	msg := resp.Messages[0]
-
-	var event Event
-	err = json.Unmarshal([]byte(*msg.Body), &event)
-	if err != nil {
-		return nil, err
-	}
-
-	event.ID = *msg.MessageId
 
 	return events, nil
 }
@@ -99,7 +107,7 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 func (q *sqsQueue) Retry(ctx context.Context, event *Event) error {
 	_, err := q.sqsClient.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
 		QueueUrl:          aws.String(q.queueURL),
-		ReceiptHandle:     aws.String(event.ID),
+		ReceiptHandle:     aws.String(event.sqsMessageId),
 		VisibilityTimeout: 0,
 	})
 	if err != nil {
@@ -112,7 +120,7 @@ func (q *sqsQueue) Retry(ctx context.Context, event *Event) error {
 func (q *sqsQueue) Remove(ctx context.Context, event *Event) error {
 	_, err := q.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(q.queueURL),
-		ReceiptHandle: aws.String(event.ID),
+		ReceiptHandle: aws.String(event.sqsMessageId),
 	})
 	if err != nil {
 		return err

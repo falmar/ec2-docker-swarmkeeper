@@ -52,7 +52,7 @@ func Cmd() *cobra.Command {
 
 			fmt.Println("token: ", token)
 
-			instanceId, err := metadata.GetInstanceId(ctx, token)
+			instanceInfo, err := metadata.GetInstanceInfo(ctx, token)
 			if err != nil {
 				return fmt.Errorf("failed to get instance id: %s\n", err)
 			}
@@ -112,9 +112,9 @@ func Cmd() *cobra.Command {
 			})
 
 			worker := node.NewWorker(&node.Config{
-				InstanceID: instanceId,
-				NodeID:     infoOut.Swarm.NodeID,
-				Queue:      sqsQueue,
+				InstanceInfo: instanceInfo,
+				NodeID:       infoOut.Swarm.NodeID,
+				Queue:        sqsQueue,
 
 				EC2Metadata:    metadata,
 				ListenInterval: 5 * time.Second,

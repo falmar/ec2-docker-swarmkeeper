@@ -1,14 +1,15 @@
 version: "3.8"
 
 services:
-  notify:
+  worker:
     init: true
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    image: "docker.io/falmar/docker-swarm-ec2:notify_1"
+    image: "docker.io/falmar/ec2-docker-swarmkeeper:node"
+    command: [ "./main", "worker" ]
     networks:
       - net
-#      - host
+      #- host
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:
@@ -24,6 +25,32 @@ services:
       placement:
         constraints:
           - node.role == worker
+
+  manager:
+    init: true
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    image: "docker.io/falmar/ec2-docker-swarmkeeper:node"
+    command: [ "./main", "manager" ]
+    networks:
+      - net
+      #- host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    secrets:
+      - source: slacker_env
+        target: /app/config.yaml
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 1s
+      placement:
+        constraints:
+          - node.role == manager
 
 secrets:
   slacker_env:

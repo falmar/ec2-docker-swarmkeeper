@@ -1,6 +1,9 @@
 package queue
 
-import "context"
+import (
+	"context"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
+)
 
 type EventName string
 
@@ -15,7 +18,7 @@ type NodeShutdownPayload struct {
 	Reason string `json:"reason"`
 
 	// EC2
-	InstanceID string `json:"instance_id"`
+	InstanceInfo *ec2metadata.InstanceInfo `json:"instance_info"`
 }
 type NodeRemovePayload struct {
 	// Docker
@@ -23,9 +26,13 @@ type NodeRemovePayload struct {
 }
 
 type Event struct {
+	sqsMessageId string
+
 	ID   string
 	Name EventName
-	Data interface{}
+	Data []byte
+
+	RetryCount int
 }
 
 type Queue interface {

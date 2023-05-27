@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
 	"github.com/go-chi/chi/v5"
+	"github.com/spf13/viper"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,6 +38,7 @@ func NewServer(cfg *Config) *http.Server {
 	router.Get("/latest/meta-data/instance-id", server.handleInstanceId)
 	router.Get("/latest/meta-data/spot/instance-action", server.handleSpotInterruption)
 	router.Get("/latest/meta-data/events/recommendations/rebalance", server.handleASGReBalance)
+	router.Get("/latest/meta-data/tags/instance/{tag}", server.handleTag)
 
 	router.Post("/spot-interruption", server.mockSpotInterruption)
 	router.Post("/asg-rebalance", server.mockASGReBalance)
@@ -111,6 +114,40 @@ func (s *server) handleSpotInterruption(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+}
+
+type tag struct {
+	Key   string
+	Value string
+}
+
+func (s *server) handleTag(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("x-aws-ec2-metadata-token") == "" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	tagName := chi.URLParam(r, "tag")
+	tags := viper.GetStringSlice("metadata.mock_tags")
+
+	for _, tag := range tags {
+		s := strings.Split(tag, "=")
+
+		if len(s) != 2 {
+			log.Println("invalid tag format:", tag)
+			continue
+		}
+
+		if s[0] == tagName {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+
+			w.Write([]byte(s[1]))
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusNotFound)
 }
 
 func (s *server) mockSpotInterruption(w http.ResponseWriter, r *http.Request) {

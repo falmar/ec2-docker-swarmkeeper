@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
@@ -16,11 +17,11 @@ type Service interface {
 }
 
 type service struct {
-	nodeID     string
-	instanceID string
-	metadata   ec2metadata.Service
-	interval   time.Duration
-	queue      queue.Queue
+	nodeID       string
+	instanceInfo *ec2metadata.InstanceInfo
+	metadata     ec2metadata.Service
+	interval     time.Duration
+	queue        queue.Queue
 
 	errChan       chan error
 	interruptChan chan *ec2metadata.SpotInterruptionResponse
@@ -28,8 +29,8 @@ type service struct {
 }
 
 type Config struct {
-	NodeID     string
-	InstanceID string
+	NodeID       string
+	InstanceInfo *ec2metadata.InstanceInfo
 
 	Queue          queue.Queue
 	EC2Metadata    ec2metadata.Service
@@ -38,8 +39,8 @@ type Config struct {
 
 func NewWorker(cfg *Config) Service {
 	return &service{
-		nodeID:     cfg.NodeID,
-		instanceID: cfg.InstanceID,
+		nodeID:       cfg.NodeID,
+		instanceInfo: cfg.InstanceInfo,
 
 		metadata: cfg.EC2Metadata,
 		interval: cfg.ListenInterval,
@@ -71,16 +72,19 @@ breakLoop:
 			log.Println(message)
 
 			payload, err := json.Marshal(&queue.NodeShutdownPayload{
-				NodeID:     w.nodeID,
-				InstanceID: w.instanceID,
-				Reason:     message,
+				NodeID:       w.nodeID,
+				InstanceInfo: w.instanceInfo,
+				Reason:       message,
 			})
 			if err != nil {
 				return err
 			}
 
 			slack.Notify(message)
+
+			id := sha1.Sum([]byte(message))
 			err = w.queue.Push(ctx, &queue.Event{
+				ID:   string(id[:]),
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
 			})
@@ -95,16 +99,19 @@ breakLoop:
 			log.Println(message)
 
 			payload, err := json.Marshal(&queue.NodeShutdownPayload{
-				NodeID:     w.nodeID,
-				InstanceID: w.instanceID,
-				Reason:     message,
+				NodeID:       w.nodeID,
+				InstanceInfo: w.instanceInfo,
+
+				Reason: message,
 			})
 			if err != nil {
 				return err
 			}
 
 			slack.Notify(message)
+			id := sha1.Sum([]byte(message))
 			err = w.queue.Push(ctx, &queue.Event{
+				ID:   string(id[:]),
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
 			})
@@ -134,7 +141,7 @@ func (w *service) handleSpotInterruption(ctx context.Context) {
 			log.Println("checking for spot interruption...")
 
 			interruption, err := w.metadata.GetSpotInterruption(ctx, token)
-			if errors.Is(err, ec2metadata.ErrInterruptionNotFound) {
+			if errors.Is(err, ec2metadata.ErrNotFound) {
 				continue
 			} else if err != nil {
 				w.errChan <- err
@@ -161,7 +168,7 @@ func (w *service) handleASGReBalance(ctx context.Context) {
 			log.Println("checking for asg re-balance...")
 
 			reBalance, err := w.metadata.GetASGReBalance(ctx, token)
-			if errors.Is(err, ec2metadata.ErrRebalanceNotFount) {
+			if errors.Is(err, ec2metadata.ErrNotFound) {
 				continue
 			} else if err != nil {
 				w.errChan <- err
