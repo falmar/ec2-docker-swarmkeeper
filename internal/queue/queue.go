@@ -26,7 +26,7 @@ type NodeRemovePayload struct {
 }
 
 type Event struct {
-	sqsMessageId string
+	sqsReceiptHandle string
 
 	ID   string
 	Name EventName

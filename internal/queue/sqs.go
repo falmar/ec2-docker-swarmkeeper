@@ -101,7 +101,7 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 		}
 
 		events = append(events, &Event{
-			sqsMessageId: aws.ToString(msg.MessageId),
+			sqsReceiptHandle: aws.ToString(msg.ReceiptHandle),
 
 			ID:         aws.ToString(msg.MessageAttributes["id"].StringValue),
 			Name:       EventName(aws.ToString(msg.MessageAttributes["name"].StringValue)),
@@ -116,7 +116,7 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 func (q *sqsQueue) Retry(ctx context.Context, event *Event) error {
 	_, err := q.sqsClient.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
 		QueueUrl:          aws.String(q.queueURL),
-		ReceiptHandle:     aws.String(event.sqsMessageId),
+		ReceiptHandle:     aws.String(event.sqsReceiptHandle),
 		VisibilityTimeout: 0,
 	})
 	if err != nil {
@@ -129,7 +129,7 @@ func (q *sqsQueue) Retry(ctx context.Context, event *Event) error {
 func (q *sqsQueue) Remove(ctx context.Context, event *Event) error {
 	_, err := q.sqsClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 		QueueUrl:      aws.String(q.queueURL),
-		ReceiptHandle: aws.String(event.sqsMessageId),
+		ReceiptHandle: aws.String(event.sqsReceiptHandle),
 	})
 	if err != nil {
 		return err

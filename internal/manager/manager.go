@@ -92,7 +92,7 @@ func (svc *service) Listen(ctx context.Context) error {
 			for _, event := range completedEvents {
 				err := svc.queue.Remove(ctx, event)
 				if err != nil {
-					log.Printf("failed to complete event: %v", err)
+					log.Printf("failed to remove event: %v", err)
 					continue
 				}
 			}
