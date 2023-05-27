@@ -36,11 +36,11 @@ func NewSQSQueue(cfg *SQSConfig) Queue {
 	}
 }
 
-func (q *sqsQueue) Push(ctx context.Context, event *Event) error {
+func (q *sqsQueue) Push(ctx context.Context, event *Event, delay int64) error {
 	out, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		MessageBody:  aws.String(string(event.Data)),
 		QueueUrl:     aws.String(q.queueURL),
-		DelaySeconds: 0,
+		DelaySeconds: int32(delay),
 		MessageAttributes: map[string]types.MessageAttributeValue{
 			"id": {
 				DataType:    aws.String("String"),

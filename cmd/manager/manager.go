@@ -75,7 +75,7 @@ func Cmd() *cobra.Command {
 			// aws
 			awsConfig, err := config.LoadDefaultConfig(
 				ctx,
-				config.WithDefaultRegion(viper.GetString("aws.region")),
+				config.WithRegion(viper.GetString("aws.region")),
 				config.WithCredentialsProvider(
 					credentials.NewStaticCredentialsProvider(
 						viper.GetString("aws.access_key_id"),
@@ -98,7 +98,7 @@ func Cmd() *cobra.Command {
 				QueueURL:          viper.GetString("sqs.queue_url"),
 				Client:            sqs.NewFromConfig(awsConfig),
 				PollInterval:      20 * time.Second, // this node doesnt poll, it just pushes
-				VisibilityTimeout: 0,
+				VisibilityTimeout: 1 * time.Minute,
 			})
 			// -- queue
 

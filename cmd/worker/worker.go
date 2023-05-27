@@ -85,7 +85,7 @@ func Cmd() *cobra.Command {
 			// aws
 			awsConfig, err := config.LoadDefaultConfig(
 				ctx,
-				config.WithDefaultRegion(viper.GetString("aws.region")),
+				config.WithRegion(viper.GetString("aws.region")),
 				config.WithCredentialsProvider(
 					credentials.NewStaticCredentialsProvider(
 						viper.GetString("aws.access_key_id"),

@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
@@ -58,7 +59,9 @@ func (svc *service) Listen(ctx context.Context) error {
 
 			events, err := svc.queue.Pop(ctx, 10)
 			// handle empty queue
-			if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			} else if err != nil {
 				return err
 			}
 
@@ -68,9 +71,13 @@ func (svc *service) Listen(ctx context.Context) error {
 				switch event.Name {
 				case queue.NodeShutdownEvent:
 					// drain the node
-
 					err := svc.handleNodeShutdownEvent(ctx, event)
 					if err != nil {
+						if event.RetryCount > 3 {
+							log.Printf("failed to handle node shutdown event: %v", err)
+							completedEvents = append(completedEvents, event)
+						}
+
 						log.Printf("failed to handle node shutdown event: %v", err)
 						continue
 					}
@@ -78,9 +85,13 @@ func (svc *service) Listen(ctx context.Context) error {
 					completedEvents = append(completedEvents, event)
 				case queue.NodeRemoveEvent:
 					// remove the node from the swarm
-
 					err := svc.handleNodeRemoveEvent(ctx, event)
 					if err != nil {
+						if event.RetryCount > 3 {
+							log.Printf("failed to handle node shutdown event: %v", err)
+							completedEvents = append(completedEvents, event)
+						}
+
 						log.Printf("failed to handle node remove event: %v", err)
 						continue
 					}
