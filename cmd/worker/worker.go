@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/docker/docker/client"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/docker"
@@ -31,12 +32,25 @@ func Cmd() *cobra.Command {
 			log.Println("Starting...")
 
 			// metadata
-			metadata := ec2metadata.NewService(ec2metadata.DefaultConfig())
+			var metaConfig *ec2metadata.MetadataServiceConfig
+
+			if viper.GetString("metadata.host") != "" && viper.GetString("metadata.port") != "" {
+				metaConfig = &ec2metadata.MetadataServiceConfig{
+					Host: viper.GetString("metadata.host"),
+					Port: viper.GetString("metadata.port"),
+				}
+			} else {
+				metaConfig = ec2metadata.DefaultConfig()
+			}
+
+			metadata := ec2metadata.NewService(metaConfig)
 
 			token, err := metadata.GetToken(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to get token: %s\n", err)
 			}
+
+			fmt.Println("token: ", token)
 
 			instanceId, err := metadata.GetInstanceId(ctx, token)
 			if err != nil {
@@ -63,9 +77,9 @@ func Cmd() *cobra.Command {
 				return fmt.Errorf("this node is not part of a swarm")
 			}
 
-			if pingOut.SwarmStatus.ControlAvailable {
-				return fmt.Errorf("this is a manager node, not a worker node")
-			}
+			//if pingOut.SwarmStatus.ControlAvailable {
+			//	return fmt.Errorf("this is a manager node, not a worker node")
+			//}
 
 			infoOut, err := dockerd.Info(ctx)
 			if err != nil {
@@ -74,7 +88,17 @@ func Cmd() *cobra.Command {
 			// -- docker
 
 			// aws
-			awsConfig, err := config.LoadDefaultConfig(ctx)
+			awsConfig, err := config.LoadDefaultConfig(
+				ctx,
+				config.WithDefaultRegion(viper.GetString("aws.region")),
+				config.WithCredentialsProvider(
+					credentials.NewStaticCredentialsProvider(
+						viper.GetString("aws.access_key_id"),
+						viper.GetString("aws.secret_access_key"),
+						"",
+					),
+				),
+			)
 			if err != nil {
 				return fmt.Errorf("failed to load aws config: %s\n", err)
 			}
@@ -106,7 +130,9 @@ func Cmd() *cobra.Command {
 				slack.Notify("Received quit signal...")
 
 				// Allow time for the worker node fetch from metadata service
-				time.Sleep(30 * time.Second)
+				if os.Getenv("DEBUG") == "" {
+					time.Sleep(30 * time.Second)
+				}
 
 				cancel()
 			}()

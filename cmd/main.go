@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/falmar/ec2-docker-swarmkeeper/cmd/metadata"
 	"github.com/falmar/ec2-docker-swarmkeeper/cmd/worker"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -24,6 +25,7 @@ func main() {
 	}
 
 	rootCmd.AddCommand(worker.Cmd())
+	rootCmd.AddCommand(metadata.Cmd())
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		log.Fatalf("failed to execute command: %s\n", err)

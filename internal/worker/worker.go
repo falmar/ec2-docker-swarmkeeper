@@ -7,6 +7,7 @@ import (
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/queue"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
+	"log"
 	"time"
 )
 
@@ -66,17 +67,19 @@ breakLoop:
 			return err
 		case r := <-w.reBalanceChan:
 			cancel()
+			message := "ASG ReBalance - TS:" + r.Time.Format(time.RFC3339)
+			log.Println(message)
 
 			payload, err := json.Marshal(&queue.NodeShutdownPayload{
 				NodeID:     w.nodeID,
 				InstanceID: w.instanceID,
-				Reason:     "ASG ReBalance - TS:" + r.Time.Format(time.RFC3339),
+				Reason:     message,
 			})
 			if err != nil {
 				return err
 			}
 
-			slack.Notify("ASG Rebalance")
+			slack.Notify(message)
 			err = w.queue.Push(ctx, &queue.Event{
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
@@ -88,18 +91,19 @@ breakLoop:
 			break breakLoop
 		case i := <-w.interruptChan:
 			cancel()
-			cancel()
+			message := "Spot Interruption - TS:" + i.Time.Format(time.RFC3339)
+			log.Println(message)
 
 			payload, err := json.Marshal(&queue.NodeShutdownPayload{
 				NodeID:     w.nodeID,
 				InstanceID: w.instanceID,
-				Reason:     "ASG ReBalance - TS:" + i.Time.Format(time.RFC3339),
+				Reason:     message,
 			})
 			if err != nil {
 				return err
 			}
 
-			slack.Notify("Spot Interruption")
+			slack.Notify(message)
 			err = w.queue.Push(ctx, &queue.Event{
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
@@ -127,6 +131,8 @@ func (w *service) handleSpotInterruption(ctx context.Context) {
 				return
 			}
 
+			log.Println("checking for spot interruption...")
+
 			interruption, err := w.metadata.GetSpotInterruption(ctx, token)
 			if errors.Is(err, ec2metadata.ErrInterruptionNotFound) {
 				continue
@@ -151,6 +157,8 @@ func (w *service) handleASGReBalance(ctx context.Context) {
 				w.errChan <- err
 				return
 			}
+
+			log.Println("checking for asg re-balance...")
 
 			reBalance, err := w.metadata.GetASGReBalance(ctx, token)
 			if errors.Is(err, ec2metadata.ErrRebalanceNotFount) {

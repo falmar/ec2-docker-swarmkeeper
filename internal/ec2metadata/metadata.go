@@ -33,24 +33,28 @@ func DefaultConfig() *MetadataServiceConfig {
 	return &MetadataServiceConfig{
 		TokenTTL: 21600,
 		Host:     "169.254.169.254",
+		Port:     "80",
 	}
 }
 
 type MetadataServiceConfig struct {
 	TokenTTL int
 	Host     string
+	Port     string
 }
 
 func NewService(cfg *MetadataServiceConfig) Service {
 	return &service{
 		ttl:  cfg.TokenTTL,
 		host: cfg.Host,
+		port: cfg.Port,
 	}
 }
 
 type service struct {
 	ttl  int
 	host string
+	port string
 
 	token         string
 	lastFetchTime int64
@@ -60,12 +64,16 @@ type service struct {
 func (t *service) GetToken(ctx context.Context) (string, error) {
 	t.mu.Lock()
 
-	if t.token == "" || t.lastFetchTime+int64(t.ttl) < time.Now().Unix() {
+	if t.token != "" && t.lastFetchTime+int64(t.ttl) < time.Now().Unix() {
 		t.mu.Unlock()
 		return t.token, nil
 	}
 
-	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/api/token", t.host))
+	fmt.Println("token: ", t.host, t.port)
+
+	endpoint, err := url.Parse(fmt.Sprintf("http://%s:%s/latest/api/token", t.host, t.port))
+	fmt.Println("endpoint: ", endpoint, err)
+
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token-ttl-seconds", strconv.Itoa(t.ttl))
 	req := &http.Request{
@@ -108,7 +116,7 @@ func (t *service) GetToken(ctx context.Context) (string, error) {
 }
 
 func (t *service) GetInstanceId(ctx context.Context, token string) (string, error) {
-	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/meta-data/instance-id", t.host))
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s:%s/latest/meta-data/instance-id", t.host, t.port))
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token", token)
 	req := &http.Request{
@@ -144,16 +152,16 @@ func (t *service) GetInstanceId(ctx context.Context, token string) (string, erro
 }
 
 type ASGReBalanceResponse struct {
-	Time time.Time
+	Time time.Time `json:"noticeTime"`
 }
 
 func (t *service) GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error) {
-	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/api/token", t.host))
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s:%s/latest/meta-data/events/recommendations/rebalance", t.host, t.port))
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token", token)
 	client := &http.Client{Timeout: 1 * time.Second}
 	req := &http.Request{
-		Method: "PUT",
+		Method: "GET",
 		URL:    endpoint,
 		Header: header,
 	}
@@ -186,7 +194,7 @@ type SpotInterruptionResponse struct {
 }
 
 func (t *service) GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error) {
-	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/meta-data/spot/instance-action", t.host))
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s:%s/latest/meta-data/spot/instance-action", t.host, t.port))
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token", token)
 	client := &http.Client{Timeout: 1 * time.Second}
