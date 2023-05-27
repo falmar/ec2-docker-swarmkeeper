@@ -166,20 +166,6 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 		return fmt.Errorf("event [%s]: failed to unmarshal event data: %w", event.ID, err)
 	}
 
-	slack.Notify(fmt.Sprintf("event [%s]: instance id: %s", event.ID, payload.InstanceInfo.InstanceID))
-
-	// record the lifecycle action heartbeat
-	if os.Getenv("DEBUG") == "" {
-		_, err = svc.asg.RecordLifecycleActionHeartbeat(ctx, &autoscaling.RecordLifecycleActionHeartbeatInput{
-			InstanceId:           aws.String(payload.InstanceInfo.InstanceID),
-			AutoScalingGroupName: aws.String(payload.InstanceInfo.AutoscalingGroup),
-			LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
-		})
-		if err != nil {
-			return fmt.Errorf("event [%s]: failed to record lifecycle action heartbeat: %w", event.ID, err)
-		}
-	}
-
 	node, _, err := svc.dockerd.NodeInspectWithRaw(ctx, payload.NodeID)
 	if err != nil {
 		return fmt.Errorf("event [%s]: failed to inspect node: %w", event.ID, err)
@@ -193,7 +179,19 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 		return fmt.Errorf("event [%s]: failed to drain node: %w", event.ID, err)
 	}
 
-	slack.Notify(fmt.Sprintf("event [%s]: draining node: %s", event.ID, node.ID))
+	slack.Notify(fmt.Sprintf("event [%s]: draining node/instance: %s/%s", event.ID, node.ID, payload.InstanceInfo.InstanceID))
+
+	// record the lifecycle action heartbeat
+	if os.Getenv("DEBUG") == "" {
+		_, err = svc.asg.RecordLifecycleActionHeartbeat(ctx, &autoscaling.RecordLifecycleActionHeartbeatInput{
+			InstanceId:           aws.String(payload.InstanceInfo.InstanceID),
+			AutoScalingGroupName: aws.String(payload.InstanceInfo.AutoscalingGroup),
+			LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
+		})
+		if err != nil {
+			return fmt.Errorf("event [%s]: failed to record lifecycle action heartbeat: %w", event.ID, err)
+		}
+	}
 
 	// TODO: monitor the node until it is drained?
 	// TODO: delay draining depending on type of interruption?
