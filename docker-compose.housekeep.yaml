@@ -5,11 +5,10 @@ services:
     init: true
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    image: "docker.io/falmar/ec2-docker-swarmkeeper:node${IMAGE_PREFIX}"
+    image: "docker.io/falmar/ec2-docker-swarmkeeper:node${IMAGE_SUFFIX}"
     command: [ "worker" ]
     networks:
       - net
-      #- host
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:
@@ -30,11 +29,10 @@ services:
     init: true
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    image: "docker.io/falmar/ec2-docker-swarmkeeper:node${IMAGE_PREFIX}"
+    image: "docker.io/falmar/ec2-docker-swarmkeeper:node${IMAGE_SUFFIX}"
     command: [ "manager" ]
     networks:
       - net
-      #- host
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:
