@@ -36,6 +36,8 @@ func NewSQSQueue(cfg *SQSConfig) Queue {
 	}
 }
 
+// Push pushes an event to the queue
+// delay is in seconds
 func (q *sqsQueue) Push(ctx context.Context, event *Event, delay int64) error {
 	out, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		MessageBody:  aws.String(string(event.Data)),

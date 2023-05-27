@@ -87,7 +87,7 @@ breakLoop:
 				ID:   hex.EncodeToString(id[:]),
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
-			})
+			}, 0)
 			if err != nil {
 				return err
 			}
@@ -114,7 +114,7 @@ breakLoop:
 				ID:   hex.EncodeToString(id[:]),
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
-			})
+			}, 0)
 			if err != nil {
 				return err
 			}

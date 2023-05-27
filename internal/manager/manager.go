@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,16 +118,16 @@ func (svc *service) Listen(ctx context.Context) error {
 }
 
 func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Event) error {
-	slack.Notify(fmt.Sprintf("%s: received node shutdown event", event.ID))
+	slack.Notify(fmt.Sprintf("event [%s]: received node shutdown event", event.ID))
 
 	payload := &queue.NodeShutdownPayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
 	if err != nil {
-		return fmt.Errorf("%s: failed to unmarshal event data: %w", event.ID, err)
+		return fmt.Errorf("event [%s]: failed to unmarshal event data: %w", event.ID, err)
 	}
 
-	slack.Notify(fmt.Sprintf("%s: instance id: %s", event.ID, payload.InstanceInfo.InstanceID))
+	slack.Notify(fmt.Sprintf("event [%s]: instance id: %s", event.ID, payload.InstanceInfo.InstanceID))
 
 	// record the lifecycle action heartbeat
 	if os.Getenv("DEBUG") == "" {
@@ -136,13 +137,13 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 			LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
 		})
 		if err != nil {
-			return fmt.Errorf("%s: failed to record lifecycle action heartbeat: %w", event.ID, err)
+			return fmt.Errorf("event [%s]: failed to record lifecycle action heartbeat: %w", event.ID, err)
 		}
 	}
 
 	node, _, err := svc.dockerd.NodeInspectWithRaw(ctx, payload.NodeID)
 	if err != nil {
-		return fmt.Errorf("%s: failed to inspect node: %w", event.ID, err)
+		return fmt.Errorf("event [%s]: failed to inspect node: %w", event.ID, err)
 	}
 
 	node.Spec.Availability = swarm.NodeAvailabilityDrain
@@ -150,10 +151,10 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 	// drain the node
 	err = svc.dockerd.NodeUpdate(ctx, node.ID, node.Version, node.Spec)
 	if err != nil {
-		return fmt.Errorf("%s: failed to drain node: %w", event.ID, err)
+		return fmt.Errorf("event [%s]: failed to drain node: %w", event.ID, err)
 	}
 
-	slack.Notify(fmt.Sprintf("%s: draining node: %s", event.ID, node.ID))
+	slack.Notify(fmt.Sprintf("event [%s]: draining node: %s", event.ID, node.ID))
 
 	// TODO: monitor the node until it is drained?
 
@@ -167,16 +168,27 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 			LifecycleActionResult: aws.String("CONTINUE"),
 		})
 		if err != nil {
-			return fmt.Errorf("%s: failed to complete lifecycle action: %w", event.ID, err)
+			return fmt.Errorf("event [%s]: failed to complete lifecycle action: %w", event.ID, err)
 		}
 
-		slack.Notify(fmt.Sprintf("%s: completed lifecycle action for instance: %s", event.ID, payload.InstanceInfo.InstanceID))
+		slack.Notify(fmt.Sprintf("event [%s]: completed lifecycle action for instance: %s", event.ID, payload.InstanceInfo.InstanceID))
 	}
 
-	return nil
+	data, _ := json.Marshal(&queue.NodeRemovePayload{
+		NodeID: payload.NodeID,
+	})
+	err = svc.queue.Push(ctx, &queue.Event{
+		ID:   fmt.Sprintf("%x", sha1.Sum(data)),
+		Name: queue.NodeRemoveEvent,
+		Data: data,
+	}, 60)
+
+	return err
 }
 
 func (svc *service) handleNodeRemoveEvent(ctx context.Context, event *queue.Event) error {
+	slack.Notify(fmt.Sprintf("event [%s]: received node remove event", event.ID))
+
 	payload := &queue.NodeRemovePayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
@@ -195,6 +207,8 @@ func (svc *service) handleNodeRemoveEvent(ctx context.Context, event *queue.Even
 	if err != nil {
 		return fmt.Errorf("failed to remove node: %w", err)
 	}
+
+	slack.Notify(fmt.Sprintf("event [%s]: removed node: %s", event.ID, node.ID))
 
 	return nil
 }
