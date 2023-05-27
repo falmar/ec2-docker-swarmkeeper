@@ -56,6 +56,7 @@ func New(cfg Config) Service {
 
 func (svc *service) Listen(ctx context.Context) error {
 	removeTimer := time.NewTimer(5 * time.Minute)
+	drainTimer := time.NewTimer(30 * time.Second)
 
 	for {
 		select {
@@ -105,7 +106,8 @@ func (svc *service) Listen(ctx context.Context) error {
 				log.Printf("failed to complete all events: processed: %d / received: %d", len(completedEvents), len(events))
 				continue
 			}
-		case <-time.After(10 * time.Second):
+		case <-drainTimer.C:
+			drainTimer.Reset(30 * time.Second)
 			log.Println("polling for drain events...")
 
 			events, err := svc.drain.Pop(ctx, 10)
