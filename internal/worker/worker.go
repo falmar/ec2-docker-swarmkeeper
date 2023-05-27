@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/queue"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -25,8 +27,7 @@ type service struct {
 	queue        queue.Queue
 
 	errChan       chan error
-	interruptChan chan *ec2metadata.SpotInterruptionResponse
-	reBalanceChan chan *ec2metadata.ASGReBalanceResponse
+	interruptChan chan *InstanceInterrupt
 }
 
 type Config struct {
@@ -48,8 +49,7 @@ func NewWorker(cfg *Config) Service {
 		queue:    cfg.Queue,
 
 		errChan:       make(chan error),
-		interruptChan: make(chan *ec2metadata.SpotInterruptionResponse),
-		reBalanceChan: make(chan *ec2metadata.ASGReBalanceResponse),
+		interruptChan: make(chan *InstanceInterrupt),
 	}
 }
 
@@ -59,6 +59,7 @@ func (w *service) Listen(ctx context.Context) error {
 
 	go w.handleSpotInterruption(ctx)
 	go w.handleASGReBalance(ctx)
+	go w.handleLifecycle(ctx)
 
 breakLoop:
 	for {
@@ -67,39 +68,16 @@ breakLoop:
 			return nil
 		case err := <-w.errChan:
 			return err
-		case r := <-w.reBalanceChan:
-			message := "ASG ReBalance - TS:" + r.Time.Format(time.RFC3339)
-			log.Println(message)
-
-			payload, err := json.Marshal(&queue.NodeShutdownPayload{
-				NodeID:       w.nodeID,
-				InstanceInfo: w.instanceInfo,
-				Reason:       message,
-			})
-			if err != nil {
-				return err
-			}
-
-			slack.Notify(message)
-
-			id := sha1.Sum(payload)
-			err = w.queue.Push(ctx, &queue.Event{
-				ID:   hex.EncodeToString(id[:]),
-				Name: queue.NodeShutdownEvent,
-				Data: payload,
-			}, 0)
-			if err != nil {
-				return err
-			}
-
-			break breakLoop
 		case i := <-w.interruptChan:
-			message := "Spot Interruption - TS:" + i.Time.Format(time.RFC3339)
+			message := fmt.Sprintf("Interruption [%s] detected at %s", i.Type, time.Now().Format(time.RFC3339))
 			log.Println(message)
 
-			payload, err := json.Marshal(&queue.NodeShutdownPayload{
+			payload, err := json.Marshal(&NodeShutdownPayload{
 				NodeID:       w.nodeID,
 				InstanceInfo: w.instanceInfo,
+
+				Type: i.Type,
+				Time: i.Time,
 
 				Reason: message,
 			})
@@ -112,7 +90,7 @@ breakLoop:
 			id := sha1.Sum(payload)
 			err = w.queue.Push(ctx, &queue.Event{
 				ID:   hex.EncodeToString(id[:]),
-				Name: queue.NodeShutdownEvent,
+				Name: NodeShutdownEvent,
 				Data: payload,
 			}, 0)
 			if err != nil {
@@ -142,7 +120,6 @@ func (w *service) handleSpotInterruption(ctx context.Context) {
 			}
 
 			log.Println("checking for spot interruption...")
-
 			interruption, err := w.metadata.GetSpotInterruption(ctx, token)
 			if errors.Is(err, ec2metadata.ErrNotFound) {
 				continue
@@ -151,14 +128,32 @@ func (w *service) handleSpotInterruption(ctx context.Context) {
 				return
 			}
 
-			w.interruptChan <- interruption
+			w.interruptChan <- &InstanceInterrupt{
+				Type: SpotInterrupt,
+				Time: interruption.Time,
+			}
 
 			return
 		}
 	}
 }
 
+type InterruptType string
+
+const (
+	SpotInterrupt         InterruptType = "Spot Interruption"
+	ASGReBalanceInterrupt InterruptType = "ASG ReBalance"
+	LifecycleInterrupt    InterruptType = "Lifecycle"
+)
+
+type InstanceInterrupt struct {
+	Type InterruptType
+	Time time.Time
+}
+
 func (w *service) handleASGReBalance(ctx context.Context) {
+	var found int
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -171,7 +166,6 @@ func (w *service) handleASGReBalance(ctx context.Context) {
 			}
 
 			log.Println("checking for asg re-balance...")
-
 			reBalance, err := w.metadata.GetASGReBalance(ctx, token)
 			if errors.Is(err, ec2metadata.ErrNotFound) {
 				continue
@@ -180,7 +174,58 @@ func (w *service) handleASGReBalance(ctx context.Context) {
 				return
 			}
 
-			w.reBalanceChan <- reBalance
+			if found == 0 {
+				found++
+				// wait for the next iteration see if spot interruption is found
+				continue
+			}
+
+			w.interruptChan <- &InstanceInterrupt{
+				Type: ASGReBalanceInterrupt,
+				Time: reBalance.Time,
+			}
+
+			return
+		}
+	}
+}
+
+func (w *service) handleLifecycle(ctx context.Context) {
+	var terminating int
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(w.interval):
+			token, err := w.metadata.GetToken(ctx)
+			if err != nil {
+				w.errChan <- err
+				return
+			}
+
+			log.Println("checking for lifecycle...")
+			lifecycle, err := w.metadata.GetLifecycle(ctx, token)
+			if errors.Is(err, ec2metadata.ErrNotFound) {
+				continue
+			} else if err != nil {
+				w.errChan <- err
+				return
+			} else if strings.ToLower(lifecycle.State) != "terminated" {
+				terminating = 0
+				continue
+			}
+
+			// if we find a lifecycle event, we wait for the next 2 iteration to see if there is a spot interruption
+			if terminating < 2 {
+				terminating++
+				continue
+			}
+
+			w.interruptChan <- &InstanceInterrupt{
+				Type: LifecycleInterrupt,
+				Time: time.Now(),
+			}
 
 			return
 		}

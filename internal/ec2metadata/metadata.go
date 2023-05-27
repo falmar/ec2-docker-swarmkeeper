@@ -25,6 +25,7 @@ type Service interface {
 	GetInstanceInfo(ctx context.Context, token string) (*InstanceInfo, error)
 	GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error)
 	GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error)
+	GetLifecycle(ctx context.Context, token string) (*LifecycleResponse, error)
 }
 
 func DefaultConfig() *MetadataServiceConfig {
@@ -187,7 +188,22 @@ func (t *service) GetSpotInterruption(ctx context.Context, token string) (*SpotI
 	return interruption, nil
 }
 
-// autoscaling/target-lifecycle-state
+type LifecycleResponse struct {
+	State string `json:"state"`
+}
+
+func (t *service) GetLifecycle(ctx context.Context, token string) (*LifecycleResponse, error) {
+	b, err := t.getMeta(ctx, token, "/autoscaling/target-lifecycle-state")
+	if err != nil {
+		return nil, err
+	}
+
+	lifecycle := &LifecycleResponse{
+		State: string(b),
+	}
+
+	return lifecycle, nil
+}
 
 func (t *service) getMeta(ctx context.Context, token, path string) ([]byte, error) {
 	endpoint, _ := url.Parse(fmt.Sprintf("http://%s:%s/latest/meta-data%s", t.host, t.port, path))

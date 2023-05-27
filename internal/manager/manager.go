@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/client"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/queue"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/worker"
 	"log"
 	"os"
 	"time"
@@ -74,7 +75,7 @@ func (svc *service) Listen(ctx context.Context) error {
 			var completedEvents []*queue.Event
 			for _, event := range events {
 				switch event.Name {
-				case queue.NodeRemoveEvent:
+				case worker.NodeRemoveEvent:
 					// remove the node from the swarm
 					err := svc.handleNodeRemoveEvent(ctx, event)
 					if err != nil {
@@ -118,7 +119,7 @@ func (svc *service) Listen(ctx context.Context) error {
 			var completedEvents []*queue.Event
 			for _, event := range events {
 				switch event.Name {
-				case queue.NodeShutdownEvent:
+				case worker.NodeShutdownEvent:
 					// drain the node
 					err := svc.handleNodeShutdownEvent(ctx, event)
 					if err != nil {
@@ -156,7 +157,7 @@ func (svc *service) Listen(ctx context.Context) error {
 func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Event) error {
 	slack.Notify(fmt.Sprintf("event [%s]: received node shutdown event", event.ID))
 
-	payload := &queue.NodeShutdownPayload{}
+	payload := &worker.NodeShutdownPayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
 	if err != nil {
@@ -193,6 +194,7 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 	slack.Notify(fmt.Sprintf("event [%s]: draining node: %s", event.ID, node.ID))
 
 	// TODO: monitor the node until it is drained?
+	// TODO: delay draining depending on type of interruption?
 
 	// not in production, so don't complete the lifecycle action
 	if os.Getenv("DEBUG") == "" {
@@ -211,12 +213,12 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 	}
 
 	// "delayed" by X time to allow the node to drain
-	data, _ := json.Marshal(&queue.NodeRemovePayload{
+	data, _ := json.Marshal(&worker.NodeRemovePayload{
 		NodeID: payload.NodeID,
 	})
 	err = svc.remove.Push(ctx, &queue.Event{
 		ID:   fmt.Sprintf("%x", sha1.Sum(data)),
-		Name: queue.NodeRemoveEvent,
+		Name: worker.NodeRemoveEvent,
 		Data: data,
 	}, 0)
 
@@ -226,7 +228,7 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 func (svc *service) handleNodeRemoveEvent(ctx context.Context, event *queue.Event) error {
 	slack.Notify(fmt.Sprintf("event [%s]: received node remove event", event.ID))
 
-	payload := &queue.NodeRemovePayload{}
+	payload := &worker.NodeRemovePayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
 	if err != nil {
