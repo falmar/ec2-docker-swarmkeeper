@@ -3,12 +3,16 @@ package worker
 import (
 	"context"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/docker/docker/client"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/docker"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/queue"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
 	node "github.com/falmar/ec2-docker-swarmkeeper/internal/worker"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"log"
 	"os"
 	"os/signal"
@@ -26,8 +30,21 @@ func Cmd() *cobra.Command {
 
 			log.Println("Starting...")
 
+			// metadata
 			metadata := ec2metadata.NewService(ec2metadata.DefaultConfig())
 
+			token, err := metadata.GetToken(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get token: %s\n", err)
+			}
+
+			instanceId, err := metadata.GetInstanceId(ctx, token)
+			if err != nil {
+				return fmt.Errorf("failed to get instance id: %s\n", err)
+			}
+			// -- metadata
+
+			// dockerd
 			dockerd, err := client.NewClientWithOpts(
 				client.WithTimeout(5*time.Second),
 				client.WithVersion("v1.42"),
@@ -37,21 +54,44 @@ func Cmd() *cobra.Command {
 				return fmt.Errorf("failed to create docker client: %s\n", err)
 			}
 
-			info, err := dockerd.Ping(ctx)
+			pingOut, err := dockerd.Ping(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to ping docker: %s\n", err)
 			}
 
-			if info.SwarmStatus == nil || info.SwarmStatus.NodeState == "inactive" {
+			if pingOut.SwarmStatus == nil || pingOut.SwarmStatus.NodeState == "inactive" {
 				return fmt.Errorf("this node is not part of a swarm")
 			}
 
-			if info.SwarmStatus.ControlAvailable {
+			if pingOut.SwarmStatus.ControlAvailable {
 				return fmt.Errorf("this is a manager node, not a worker node")
 			}
 
+			infoOut, err := dockerd.Info(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to get docker info: %s\n", err)
+			}
+			// -- docker
+
+			// aws
+			awsConfig, err := config.LoadDefaultConfig(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to load aws config: %s\n", err)
+			}
+			// -- aws
+
+			sqsQueue := queue.NewSQSQueue(&queue.SQSConfig{
+				QueueURL:          viper.GetString("sqs.queue_url"),
+				Client:            sqs.NewFromConfig(awsConfig),
+				PollInterval:      5 * time.Minute, // this node doesnt poll, it just pushes
+				VisibilityTimeout: 0,
+			})
+
 			worker := node.NewWorker(&node.Config{
-				DockerClient:   dockerd,
+				InstanceID: instanceId,
+				NodeID:     infoOut.Swarm.NodeID,
+				Queue:      sqsQueue,
+
 				EC2Metadata:    metadata,
 				ListenInterval: 5 * time.Second,
 			})
@@ -75,7 +115,7 @@ func Cmd() *cobra.Command {
 
 			if err := worker.Listen(ctx); err != nil {
 				slack.Notify(fmt.Sprintf("worker node error: %s", err))
-				return fmt.Errorf("failed to listen: %s\n", err)
+				return fmt.Errorf("worker node error: %s\n", err)
 			}
 			cancel()
 

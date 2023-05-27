@@ -2,21 +2,24 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"github.com/docker/docker/client"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/queue"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
 	"time"
 )
 
-type Worker interface {
+type Service interface {
 	Listen(ctx context.Context) error
 }
 
-type worker struct {
-	dockerClient *client.Client
-	metadata     ec2metadata.Service
-	interval     time.Duration
+type service struct {
+	nodeID     string
+	instanceID string
+	metadata   ec2metadata.Service
+	interval   time.Duration
+	queue      queue.Queue
 
 	errChan       chan error
 	interruptChan chan *ec2metadata.SpotInterruptionResponse
@@ -24,16 +27,22 @@ type worker struct {
 }
 
 type Config struct {
-	DockerClient   *client.Client
+	NodeID     string
+	InstanceID string
+
+	Queue          queue.Queue
 	EC2Metadata    ec2metadata.Service
 	ListenInterval time.Duration
 }
 
-func NewWorker(cfg *Config) Worker {
-	return &worker{
-		dockerClient: cfg.DockerClient,
-		metadata:     cfg.EC2Metadata,
-		interval:     cfg.ListenInterval,
+func NewWorker(cfg *Config) Service {
+	return &service{
+		nodeID:     cfg.NodeID,
+		instanceID: cfg.InstanceID,
+
+		metadata: cfg.EC2Metadata,
+		interval: cfg.ListenInterval,
+		queue:    cfg.Queue,
 
 		errChan:       make(chan error),
 		interruptChan: make(chan *ec2metadata.SpotInterruptionResponse),
@@ -41,7 +50,7 @@ func NewWorker(cfg *Config) Worker {
 	}
 }
 
-func (w *worker) Listen(ctx context.Context) error {
+func (w *service) Listen(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -53,18 +62,52 @@ breakLoop:
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-w.reBalanceChan:
+		case err := <-w.errChan:
+			return err
+		case r := <-w.reBalanceChan:
 			cancel()
+
+			payload, err := json.Marshal(&queue.NodeShutdownPayload{
+				NodeID:     w.nodeID,
+				InstanceID: w.instanceID,
+				Reason:     "ASG ReBalance - TS:" + r.Time.Format(time.RFC3339),
+			})
+			if err != nil {
+				return err
+			}
+
 			slack.Notify("ASG Rebalance")
-			// notify the manager
-			// drain the worker node
-			// complete the lifecycle action
+			err = w.queue.Push(ctx, &queue.Event{
+				Name: queue.NodeShutdownEvent,
+				Data: payload,
+			})
+			if err != nil {
+				return err
+			}
+
 			break breakLoop
-		case <-w.interruptChan:
+		case i := <-w.interruptChan:
 			cancel()
+			cancel()
+
+			payload, err := json.Marshal(&queue.NodeShutdownPayload{
+				NodeID:     w.nodeID,
+				InstanceID: w.instanceID,
+				Reason:     "ASG ReBalance - TS:" + i.Time.Format(time.RFC3339),
+			})
+			if err != nil {
+				return err
+			}
+
 			slack.Notify("Spot Interruption")
-			// notify the manager
-			// drain the worker node
+			err = w.queue.Push(ctx, &queue.Event{
+				Name: queue.NodeShutdownEvent,
+				Data: payload,
+			})
+			if err != nil {
+				return err
+			}
+
 			break breakLoop
 		}
 	}
@@ -72,7 +115,7 @@ breakLoop:
 	return nil
 }
 
-func (w *worker) handleSpotInterruption(ctx context.Context) {
+func (w *service) handleSpotInterruption(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -97,7 +140,7 @@ func (w *worker) handleSpotInterruption(ctx context.Context) {
 	}
 }
 
-func (w *worker) handleASGReBalance(ctx context.Context) {
+func (w *service) handleASGReBalance(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():

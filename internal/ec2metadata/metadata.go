@@ -17,12 +17,14 @@ var (
 	ErrTokenNotFound        = errors.New("token not found")
 	ErrRebalanceNotFount    = errors.New("rebalance not found")
 	ErrInterruptionNotFound = errors.New("spot interruption not found")
+	ErrInstanceIDNotFound   = errors.New("instance id not found")
 )
 
 var _ Service = &service{}
 
 type Service interface {
 	GetToken(ctx context.Context) (string, error)
+	GetInstanceId(ctx context.Context, token string) (string, error)
 	GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error)
 	GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error)
 }
@@ -103,6 +105,42 @@ func (t *service) GetToken(ctx context.Context) (string, error) {
 	t.mu.Unlock()
 
 	return token, nil
+}
+
+func (t *service) GetInstanceId(ctx context.Context, token string) (string, error) {
+	endpoint, _ := url.Parse(fmt.Sprintf("http://%s/latest/meta-data/instance-id", t.host))
+	header := http.Header{}
+	header.Set("X-aws-ec2-metadata-token", token)
+	req := &http.Request{
+		Method: "GET",
+		URL:    endpoint,
+		Header: header,
+	}
+	req = req.WithContext(ctx)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode == 404 {
+		return "", ErrInstanceIDNotFound
+	} else if res.StatusCode != 200 {
+		return "", fmt.Errorf("unexpected status code: %d", res.StatusCode)
+	}
+
+	buf := make([]byte, 256)
+
+	n, err := res.Body.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+
+	return string(buf[:n]), nil
 }
 
 type ASGReBalanceResponse struct {
