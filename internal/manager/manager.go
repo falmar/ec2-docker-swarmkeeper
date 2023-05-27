@@ -31,35 +31,40 @@ type Service interface {
 }
 
 type Config struct {
-	Queue     queue.Queue
-	Dockerd   *client.Client
-	AGSClient *autoscaling.Client
+	DrainQueue  queue.Queue
+	RemoveQueue queue.Queue
+	Dockerd     *client.Client
+	AGSClient   *autoscaling.Client
 }
 
 type service struct {
-	queue   queue.Queue
+	drain   queue.Queue
+	remove  queue.Queue
 	dockerd *client.Client
 	asg     *autoscaling.Client
 }
 
 func New(cfg Config) Service {
 	return &service{
-		queue:   cfg.Queue,
+		drain:   cfg.DrainQueue,
+		remove:  cfg.RemoveQueue,
 		dockerd: cfg.Dockerd,
 		asg:     cfg.AGSClient,
 	}
 }
 
 func (svc *service) Listen(ctx context.Context) error {
+	removeTimer := time.NewTimer(5 * time.Minute)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		default:
-			log.Println("polling for events...")
+		case <-removeTimer.C:
+			log.Println("polling for remove events...")
+			removeTimer.Reset(5 * time.Minute)
 
-			events, err := svc.queue.Pop(ctx, 10)
-			// handle empty queue
+			events, err := svc.remove.Pop(ctx, 10)
 			if errors.Is(err, context.Canceled) {
 				return nil
 			} else if err != nil {
@@ -67,23 +72,8 @@ func (svc *service) Listen(ctx context.Context) error {
 			}
 
 			var completedEvents []*queue.Event
-
 			for _, event := range events {
 				switch event.Name {
-				case queue.NodeShutdownEvent:
-					// drain the node
-					err := svc.handleNodeShutdownEvent(ctx, event)
-					if err != nil {
-						if event.RetryCount > 3 {
-							log.Printf("failed to handle node shutdown event: %v", err)
-							completedEvents = append(completedEvents, event)
-						}
-
-						log.Printf("failed to handle node shutdown event: %v", err)
-						continue
-					}
-
-					completedEvents = append(completedEvents, event)
 				case queue.NodeRemoveEvent:
 					// remove the node from the swarm
 					err := svc.handleNodeRemoveEvent(ctx, event)
@@ -101,16 +91,62 @@ func (svc *service) Listen(ctx context.Context) error {
 				}
 			}
 
+			// complete the events
 			for _, event := range completedEvents {
-				err := svc.queue.Remove(ctx, event)
+				err := svc.remove.Remove(ctx, event)
 				if err != nil {
-					log.Printf("failed to remove event: %v", err)
+					log.Printf("failed to remove [remove] event: %v", err)
 					continue
 				}
 			}
 
-			log.Println("sleeping for 10 seconds...")
-			<-time.After(10 * time.Second)
+			if len(events) != len(completedEvents) {
+				log.Printf("failed to complete all events: processed: %d / received: %d", len(completedEvents), len(events))
+				continue
+			}
+		case <-time.After(10 * time.Second):
+			log.Println("polling for drain events...")
+
+			events, err := svc.drain.Pop(ctx, 10)
+			// handle empty drain
+			if errors.Is(err, context.Canceled) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+
+			var completedEvents []*queue.Event
+			for _, event := range events {
+				switch event.Name {
+				case queue.NodeShutdownEvent:
+					// drain the node
+					err := svc.handleNodeShutdownEvent(ctx, event)
+					if err != nil {
+						if event.RetryCount > 3 {
+							log.Printf("failed to handle node shutdown event: %v", err)
+							completedEvents = append(completedEvents, event)
+						}
+
+						log.Printf("failed to handle node shutdown event: %v", err)
+						continue
+					}
+
+					completedEvents = append(completedEvents, event)
+				}
+			}
+
+			for _, event := range completedEvents {
+				err := svc.drain.Remove(ctx, event)
+				if err != nil {
+					log.Printf("failed to remove [drain] event: %v", err)
+					continue
+				}
+			}
+
+			if len(events) != len(completedEvents) {
+				log.Printf("failed to complete all events: processed: %d / received: %d", len(completedEvents), len(events))
+				continue
+			}
 		}
 	}
 
@@ -174,14 +210,15 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 		slack.Notify(fmt.Sprintf("event [%s]: completed lifecycle action for instance: %s", event.ID, payload.InstanceInfo.InstanceID))
 	}
 
+	// "delayed" by X time to allow the node to drain
 	data, _ := json.Marshal(&queue.NodeRemovePayload{
 		NodeID: payload.NodeID,
 	})
-	err = svc.queue.Push(ctx, &queue.Event{
+	err = svc.remove.Push(ctx, &queue.Event{
 		ID:   fmt.Sprintf("%x", sha1.Sum(data)),
 		Name: queue.NodeRemoveEvent,
 		Data: data,
-	}, 60)
+	}, 0)
 
 	return err
 }

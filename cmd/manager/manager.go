@@ -94,18 +94,26 @@ func Cmd() *cobra.Command {
 			// -- ASG
 
 			// queue
-			sqsQueue := queue.NewSQSQueue(&queue.SQSConfig{
-				QueueURL:          viper.GetString("sqs.queue_url"),
+			drainQueue := queue.NewSQSQueue(&queue.SQSConfig{
+				QueueURL:          viper.GetString("sqs.drain_queue"),
 				Client:            sqs.NewFromConfig(awsConfig),
 				PollInterval:      20 * time.Second, // this node doesnt poll, it just pushes
+				VisibilityTimeout: 1 * time.Minute,
+			})
+
+			removeQueue := queue.NewSQSQueue(&queue.SQSConfig{
+				QueueURL:          viper.GetString("sqs.remove_queue"),
+				Client:            sqs.NewFromConfig(awsConfig),
+				PollInterval:      1 * time.Second,
 				VisibilityTimeout: 1 * time.Minute,
 			})
 			// -- queue
 
 			svc := node.New(node.Config{
-				AGSClient: asg,
-				Queue:     sqsQueue,
-				Dockerd:   dockerd,
+				AGSClient:   asg,
+				DrainQueue:  drainQueue,
+				RemoveQueue: removeQueue,
+				Dockerd:     dockerd,
 			})
 
 			go func() {

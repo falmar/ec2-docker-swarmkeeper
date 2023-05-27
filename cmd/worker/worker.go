@@ -101,7 +101,7 @@ func Cmd() *cobra.Command {
 
 			// queue
 			sqsQueue := queue.NewSQSQueue(&queue.SQSConfig{
-				QueueURL:          viper.GetString("sqs.queue_url"),
+				QueueURL:          viper.GetString("sqs.drain_queue"),
 				Client:            sqs.NewFromConfig(awsConfig),
 				PollInterval:      5 * time.Minute, // this node doesnt poll, it just pushes
 				VisibilityTimeout: 0,

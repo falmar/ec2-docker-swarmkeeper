@@ -55,4 +55,4 @@ services:
 secrets:
   swarmkeep_env:
     external: true
-    name: swarmkeep_env3
+    name: swarmkeep_env4
