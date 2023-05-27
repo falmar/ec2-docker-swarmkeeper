@@ -5,15 +5,15 @@ services:
     init: true
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    image: "docker.io/falmar/ec2-docker-swarmkeeper:node"
-    command: [ "./main", "worker" ]
+    image: "docker.io/falmar/ec2-docker-swarmkeeper:node${IMAGE_PREFIX}"
+    command: [ "worker" ]
     networks:
       - net
       #- host
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:
-      - source: slacker_env
+      - source: swarmkeep_env
         target: /app/config.yaml
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
@@ -30,15 +30,15 @@ services:
     init: true
     stop_grace_period: 30s
     stop_signal: SIGTERM
-    image: "docker.io/falmar/ec2-docker-swarmkeeper:node"
-    command: [ "./main", "manager" ]
+    image: "docker.io/falmar/ec2-docker-swarmkeeper:node${IMAGE_PREFIX}"
+    command: [ "manager" ]
     networks:
-      - net
-      #- host
+      #- net
+      - host
     extra_hosts:
       - "host.docker.internal:host-gateway"
     secrets:
-      - source: slacker_env
+      - source: swarmkeep_env
         target: /app/config.yaml
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
@@ -53,6 +53,6 @@ services:
           - node.role == manager
 
 secrets:
-  slacker_env:
+  swarmkeep_env:
     external: true
-    name: slacker_env
+    name: swarmkeep_env3

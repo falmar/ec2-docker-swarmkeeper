@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/ec2metadata"
@@ -67,7 +68,6 @@ breakLoop:
 		case err := <-w.errChan:
 			return err
 		case r := <-w.reBalanceChan:
-			cancel()
 			message := "ASG ReBalance - TS:" + r.Time.Format(time.RFC3339)
 			log.Println(message)
 
@@ -82,9 +82,9 @@ breakLoop:
 
 			slack.Notify(message)
 
-			id := sha1.Sum([]byte(message))
+			id := sha1.Sum(payload)
 			err = w.queue.Push(ctx, &queue.Event{
-				ID:   string(id[:]),
+				ID:   hex.EncodeToString(id[:]),
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
 			})
@@ -94,7 +94,6 @@ breakLoop:
 
 			break breakLoop
 		case i := <-w.interruptChan:
-			cancel()
 			message := "Spot Interruption - TS:" + i.Time.Format(time.RFC3339)
 			log.Println(message)
 
@@ -109,9 +108,10 @@ breakLoop:
 			}
 
 			slack.Notify(message)
-			id := sha1.Sum([]byte(message))
+
+			id := sha1.Sum(payload)
 			err = w.queue.Push(ctx, &queue.Event{
-				ID:   string(id[:]),
+				ID:   hex.EncodeToString(id[:]),
 				Name: queue.NodeShutdownEvent,
 				Data: payload,
 			})
@@ -123,7 +123,10 @@ breakLoop:
 		}
 	}
 
-	return nil
+	// Wait for context to be done
+	<-ctx.Done()
+
+	return ctx.Err()
 }
 
 func (w *service) handleSpotInterruption(ctx context.Context) {
@@ -149,6 +152,8 @@ func (w *service) handleSpotInterruption(ctx context.Context) {
 			}
 
 			w.interruptChan <- interruption
+
+			return
 		}
 	}
 }
@@ -176,6 +181,8 @@ func (w *service) handleASGReBalance(ctx context.Context) {
 			}
 
 			w.reBalanceChan <- reBalance
+
+			return
 		}
 	}
 }

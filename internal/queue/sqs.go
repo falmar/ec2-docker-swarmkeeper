@@ -2,9 +2,11 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"log"
 	"strconv"
 	"time"
 )
@@ -35,8 +37,12 @@ func NewSQSQueue(cfg *SQSConfig) Queue {
 }
 
 func (q *sqsQueue) Push(ctx context.Context, event *Event) error {
+	fmt.Println("pushing event to queue...", len(string(event.Data)))
+
 	_, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
-		MessageBody: aws.String(string(event.Data)),
+		MessageBody:  aws.String(string(event.Data)),
+		QueueUrl:     aws.String(q.queueURL),
+		DelaySeconds: 0,
 		MessageAttributes: map[string]types.MessageAttributeValue{
 			"id": {
 				DataType:    aws.String("String"),
@@ -61,8 +67,9 @@ func (q *sqsQueue) Push(ctx context.Context, event *Event) error {
 
 func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 	resp, err := q.sqsClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(q.queueURL),
-		MaxNumberOfMessages: int32(size),
+		QueueUrl:                aws.String(q.queueURL),
+		MaxNumberOfMessages:     int32(size),
+		ReceiveRequestAttemptId: aws.String(fmt.Sprintf("%d", time.Now().UnixNano())),
 		AttributeNames: []types.QueueAttributeName{
 			"MessageDeduplicationId",
 			"ApproximateReceiveCount",
@@ -77,6 +84,8 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	log.Println(len(resp.Messages), "messages from queue")
 
 	if len(resp.Messages) == 0 {
 		return nil, nil
@@ -94,7 +103,7 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 		events = append(events, &Event{
 			sqsMessageId: aws.ToString(msg.MessageId),
 
-			ID:         msg.Attributes["MessageDeduplicationId"],
+			ID:         aws.ToString(msg.MessageAttributes["id"].StringValue),
 			Name:       EventName(aws.ToString(msg.MessageAttributes["name"].StringValue)),
 			Data:       []byte(aws.ToString(msg.Body)),
 			RetryCount: retries,

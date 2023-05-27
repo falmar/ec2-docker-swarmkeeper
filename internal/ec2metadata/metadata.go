@@ -67,10 +67,7 @@ func (t *service) GetToken(ctx context.Context) (string, error) {
 		return t.token, nil
 	}
 
-	fmt.Println("token: ", t.host, t.port)
-
 	endpoint, err := url.Parse(fmt.Sprintf("http://%s:%s/latest/api/token", t.host, t.port))
-	fmt.Println("endpoint: ", endpoint, err)
 
 	header := http.Header{}
 	header.Set("X-aws-ec2-metadata-token-ttl-seconds", strconv.Itoa(t.ttl))
@@ -122,18 +119,8 @@ type InstanceInfo struct {
 func (t *service) GetInstanceInfo(ctx context.Context, token string) (*InstanceInfo, error) {
 	info := &InstanceInfo{}
 
-	token, err := t.GetToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// instance id
 	b, err := t.getMeta(ctx, token, "/instance-id")
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(b, info)
 	if err != nil {
 		return nil, err
 	}
@@ -164,14 +151,10 @@ type ASGReBalanceResponse struct {
 }
 
 func (t *service) GetASGReBalance(ctx context.Context, token string) (*ASGReBalanceResponse, error) {
-	token, err := t.GetToken(ctx)
-	if err == ErrNotFound {
-		return nil, nil
-	} else if err != nil {
+	b, err := t.getMeta(ctx, token, "/events/recommendations/rebalance")
+	if err != nil {
 		return nil, err
 	}
-
-	b, err := t.getMeta(ctx, token, "/events/recommendations/rebalance")
 
 	balance := &ASGReBalanceResponse{}
 
@@ -190,9 +173,7 @@ type SpotInterruptionResponse struct {
 
 func (t *service) GetSpotInterruption(ctx context.Context, token string) (*SpotInterruptionResponse, error) {
 	b, err := t.getMeta(ctx, token, "/spot/instance-action")
-	if err == ErrNotFound {
-		return nil, nil
-	} else if err != nil {
+	if err != nil {
 		return nil, err
 	}
 

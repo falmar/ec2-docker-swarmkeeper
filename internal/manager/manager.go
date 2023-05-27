@@ -10,8 +10,10 @@ import (
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
 	"github.com/falmar/ec2-docker-swarmkeeper/internal/queue"
+	"github.com/falmar/ec2-docker-swarmkeeper/internal/slack"
 	"log"
 	"os"
+	"time"
 )
 
 var _ Service = (*service)(nil)
@@ -28,13 +30,13 @@ type Service interface {
 
 type Config struct {
 	Queue     queue.Queue
-	Dockerd   client.Client
+	Dockerd   *client.Client
 	AGSClient *autoscaling.Client
 }
 
 type service struct {
 	queue   queue.Queue
-	dockerd client.Client
+	dockerd *client.Client
 	asg     *autoscaling.Client
 }
 
@@ -52,7 +54,9 @@ func (svc *service) Listen(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		default:
-			events, err := svc.queue.Pop(ctx, 1)
+			log.Println("polling for events...")
+
+			events, err := svc.queue.Pop(ctx, 10)
 			// handle empty queue
 			if err != nil {
 				return err
@@ -92,6 +96,9 @@ func (svc *service) Listen(ctx context.Context) error {
 					continue
 				}
 			}
+
+			log.Println("sleeping for 10 seconds...")
+			<-time.After(10 * time.Second)
 		}
 	}
 
@@ -99,11 +106,27 @@ func (svc *service) Listen(ctx context.Context) error {
 }
 
 func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Event) error {
+	slack.Notify("received node shutdown event")
+
 	payload := &queue.NodeShutdownPayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal event data: %w", err)
+	}
+
+	slack.Notify(fmt.Sprintf("instance id: %s", payload.InstanceInfo.InstanceID))
+
+	// record the lifecycle action heartbeat
+	if os.Getenv("DEBUG") == "" {
+		_, err = svc.asg.RecordLifecycleActionHeartbeat(ctx, &autoscaling.RecordLifecycleActionHeartbeatInput{
+			InstanceId:           aws.String(payload.InstanceInfo.InstanceID),
+			AutoScalingGroupName: aws.String(payload.InstanceInfo.AutoscalingGroup),
+			LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to record lifecycle action heartbeat: %w", err)
+		}
 	}
 
 	node, _, err := svc.dockerd.NodeInspectWithRaw(ctx, payload.NodeID)
@@ -119,20 +142,24 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 		return fmt.Errorf("failed to drain node: %w", err)
 	}
 
-	// not in production, so don't complete the lifecycle action
-	if os.Getenv("DEBUG") != "" {
-		return nil
-	}
+	slack.Notify(fmt.Sprintf("draining node: %s", node.ID))
 
 	// TODO: monitor the node until it is drained?
 
-	_, err = svc.asg.RecordLifecycleActionHeartbeat(ctx, &autoscaling.RecordLifecycleActionHeartbeatInput{
-		InstanceId:           aws.String(payload.InstanceInfo.InstanceID),
-		AutoScalingGroupName: aws.String(payload.InstanceInfo.AutoscalingGroup),
-		LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to record lifecycle action heartbeat: %w", err)
+	// not in production, so don't complete the lifecycle action
+	if os.Getenv("DEBUG") == "" {
+		_, err = svc.asg.CompleteLifecycleAction(ctx, &autoscaling.CompleteLifecycleActionInput{
+			InstanceId:           aws.String(payload.InstanceInfo.InstanceID),
+			AutoScalingGroupName: aws.String(payload.InstanceInfo.AutoscalingGroup),
+			LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
+
+			LifecycleActionResult: aws.String("CONTINUE"),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to complete lifecycle action: %w", err)
+		}
+
+		slack.Notify(fmt.Sprintf("completed lifecycle action for instance: %s", payload.InstanceInfo.InstanceID))
 	}
 
 	return nil

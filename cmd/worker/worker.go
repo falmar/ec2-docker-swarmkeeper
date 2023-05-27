@@ -32,15 +32,12 @@ func Cmd() *cobra.Command {
 			log.Println("Starting...")
 
 			// metadata
-			var metaConfig *ec2metadata.MetadataServiceConfig
+			metaConfig := ec2metadata.DefaultConfig()
 
 			if viper.GetString("metadata.host") != "" && viper.GetString("metadata.port") != "" {
-				metaConfig = &ec2metadata.MetadataServiceConfig{
-					Host: viper.GetString("metadata.host"),
-					Port: viper.GetString("metadata.port"),
-				}
-			} else {
-				metaConfig = ec2metadata.DefaultConfig()
+				metaConfig.Port = viper.GetString("metadata.port")
+				metaConfig.Host = viper.GetString("metadata.host")
+				metaConfig.TokenTTL = int((6 * time.Hour).Seconds())
 			}
 
 			metadata := ec2metadata.NewService(metaConfig)
@@ -49,8 +46,6 @@ func Cmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to get token: %s\n", err)
 			}
-
-			fmt.Println("token: ", token)
 
 			instanceInfo, err := metadata.GetInstanceInfo(ctx, token)
 			if err != nil {
@@ -104,12 +99,14 @@ func Cmd() *cobra.Command {
 			}
 			// -- aws
 
+			// queue
 			sqsQueue := queue.NewSQSQueue(&queue.SQSConfig{
 				QueueURL:          viper.GetString("sqs.queue_url"),
 				Client:            sqs.NewFromConfig(awsConfig),
 				PollInterval:      5 * time.Minute, // this node doesnt poll, it just pushes
 				VisibilityTimeout: 0,
 			})
+			// -- queue
 
 			worker := node.NewWorker(&node.Config{
 				InstanceInfo: instanceInfo,
@@ -145,8 +142,8 @@ func Cmd() *cobra.Command {
 			}
 			cancel()
 
-			slack.Notify("Shutting down...")
-			log.Println("Shutting down...")
+			slack.Notify("Worker shutting down...")
+			log.Println("Worker shutting down...")
 
 			return nil
 		},
