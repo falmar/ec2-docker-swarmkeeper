@@ -37,9 +37,7 @@ func NewSQSQueue(cfg *SQSConfig) Queue {
 }
 
 func (q *sqsQueue) Push(ctx context.Context, event *Event) error {
-	fmt.Println("pushing event to queue...", len(string(event.Data)))
-
-	_, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
+	out, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		MessageBody:  aws.String(string(event.Data)),
 		QueueUrl:     aws.String(q.queueURL),
 		DelaySeconds: 0,
@@ -59,6 +57,8 @@ func (q *sqsQueue) Push(ctx context.Context, event *Event) error {
 	if err != nil {
 		return err
 	}
+
+	log.Println("pushed event to queue: ", aws.ToString(out.MessageId))
 
 	// TODO: should we return the message ID?
 

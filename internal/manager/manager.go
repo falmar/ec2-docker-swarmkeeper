@@ -106,16 +106,16 @@ func (svc *service) Listen(ctx context.Context) error {
 }
 
 func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Event) error {
-	slack.Notify("received node shutdown event")
+	slack.Notify(fmt.Sprintf("%s: received node shutdown event", event.ID))
 
 	payload := &queue.NodeShutdownPayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal event data: %w", err)
+		return fmt.Errorf("%s: failed to unmarshal event data: %w", event.ID, err)
 	}
 
-	slack.Notify(fmt.Sprintf("instance id: %s", payload.InstanceInfo.InstanceID))
+	slack.Notify(fmt.Sprintf("%s: instance id: %s", event.ID, payload.InstanceInfo.InstanceID))
 
 	// record the lifecycle action heartbeat
 	if os.Getenv("DEBUG") == "" {
@@ -125,13 +125,13 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 			LifecycleHookName:    aws.String(payload.InstanceInfo.LifecycleHook),
 		})
 		if err != nil {
-			return fmt.Errorf("failed to record lifecycle action heartbeat: %w", err)
+			return fmt.Errorf("%s: failed to record lifecycle action heartbeat: %w", event.ID, err)
 		}
 	}
 
 	node, _, err := svc.dockerd.NodeInspectWithRaw(ctx, payload.NodeID)
 	if err != nil {
-		return fmt.Errorf("failed to inspect node: %w", err)
+		return fmt.Errorf("%s: failed to inspect node: %w", event.ID, err)
 	}
 
 	node.Spec.Availability = swarm.NodeAvailabilityDrain
@@ -139,10 +139,10 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 	// drain the node
 	err = svc.dockerd.NodeUpdate(ctx, node.ID, node.Version, node.Spec)
 	if err != nil {
-		return fmt.Errorf("failed to drain node: %w", err)
+		return fmt.Errorf("%s: failed to drain node: %w", event.ID, err)
 	}
 
-	slack.Notify(fmt.Sprintf("draining node: %s", node.ID))
+	slack.Notify(fmt.Sprintf("%s: draining node: %s", event.ID, node.ID))
 
 	// TODO: monitor the node until it is drained?
 
@@ -156,10 +156,10 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 			LifecycleActionResult: aws.String("CONTINUE"),
 		})
 		if err != nil {
-			return fmt.Errorf("failed to complete lifecycle action: %w", err)
+			return fmt.Errorf("%s: failed to complete lifecycle action: %w", event.ID, err)
 		}
 
-		slack.Notify(fmt.Sprintf("completed lifecycle action for instance: %s", payload.InstanceInfo.InstanceID))
+		slack.Notify(fmt.Sprintf("%s: completed lifecycle action for instance: %s", event.ID, payload.InstanceInfo.InstanceID))
 	}
 
 	return nil
