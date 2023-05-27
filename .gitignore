@@ -1,5 +1,7 @@
-/config.yaml
-/deploy.yaml
+/config*.yaml
+/build*.sh
 /deploy*.sh
+/deploy*.yaml
 .idea
 /bin
+!/config.example.yaml

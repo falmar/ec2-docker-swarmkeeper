@@ -1,0 +1,19 @@
+slack:
+  channel: "#channel"
+  token: "xoxb-"
+
+aws:
+  region: "us-east-1"
+  access_key_id: ""
+  aws_secret_access_key: ""
+
+sqs:
+  drain_queue: "http://drain-url.fifo"
+  remove_queue: "http://remove-url.fifo"
+
+metadata:
+  host: localhost
+  port: 8080
+  mock_tags:
+    - "aws:autoscaling:groupName=-"
+    - "LifecycleHookName=-"
