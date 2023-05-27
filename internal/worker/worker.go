@@ -72,7 +72,7 @@ breakLoop:
 			message := fmt.Sprintf("Interruption [%s] detected at %s", i.Type, time.Now().Format(time.RFC3339))
 			log.Println(message)
 
-			payload, err := json.Marshal(&NodeShutdownPayload{
+			payload, err := json.Marshal(&NodeDrainPayload{
 				NodeID:       w.nodeID,
 				InstanceInfo: w.instanceInfo,
 
@@ -90,7 +90,7 @@ breakLoop:
 			id := sha1.Sum(payload)
 			err = w.queue.Push(ctx, &queue.Event{
 				ID:   hex.EncodeToString(id[:]),
-				Name: NodeShutdownEvent,
+				Name: NodeDrainEvent,
 				Data: payload,
 			}, 0)
 			if err != nil {

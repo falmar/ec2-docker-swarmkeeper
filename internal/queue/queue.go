@@ -20,6 +20,6 @@ type Queue interface {
 	Pop(ctx context.Context, size int64) ([]*Event, error)
 
 	Push(ctx context.Context, event *Event, delay int64) error
-	Retry(ctx context.Context, event *Event) error
+	Retry(ctx context.Context, event *Event, delay int64) error
 	Remove(ctx context.Context, event *Event) error
 }

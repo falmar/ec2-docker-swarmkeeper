@@ -81,7 +81,7 @@ func (svc *service) Listen(ctx context.Context) error {
 					err := svc.handleNodeRemoveEvent(ctx, event)
 					if err != nil {
 						if event.RetryCount > 3 {
-							log.Printf("failed to handle node shutdown event: %v", err)
+							log.Printf("failed to handle node drain event: %v", err)
 							completedEvents = append(completedEvents, event)
 						}
 
@@ -121,16 +121,16 @@ func (svc *service) Listen(ctx context.Context) error {
 			var completedEvents []*queue.Event
 			for _, event := range events {
 				switch event.Name {
-				case worker.NodeShutdownEvent:
+				case worker.NodeDrainEvent:
 					// drain the node
-					err := svc.handleNodeShutdownEvent(ctx, event)
+					err := svc.handleNodeDrainEvent(ctx, event)
 					if err != nil {
 						if event.RetryCount > 3 {
-							log.Printf("failed to handle node shutdown event: %v", err)
+							log.Printf("failed to handle node drain event: %v", err)
 							completedEvents = append(completedEvents, event)
 						}
 
-						log.Printf("failed to handle node shutdown event: %v", err)
+						log.Printf("failed to handle node drain event: %v", err)
 						continue
 					}
 
@@ -156,10 +156,10 @@ func (svc *service) Listen(ctx context.Context) error {
 	return nil
 }
 
-func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Event) error {
-	slack.Notify(fmt.Sprintf("event [%s]: received node shutdown event", event.ID))
+func (svc *service) handleNodeDrainEvent(ctx context.Context, event *queue.Event) error {
+	slack.Notify(fmt.Sprintf("event [%s]: received node drain event", event.ID))
 
-	payload := &worker.NodeShutdownPayload{}
+	payload := &worker.NodeDrainPayload{}
 
 	err := json.Unmarshal(event.Data, &payload)
 	if err != nil {
@@ -180,6 +180,9 @@ func (svc *service) handleNodeShutdownEvent(ctx context.Context, event *queue.Ev
 	}
 
 	slack.Notify(fmt.Sprintf("event [%s]: draining node/instance: %s/%s", event.ID, node.ID, payload.InstanceInfo.InstanceID))
+
+	// TODO: lifecycle hooks may not exist yet if node is deregistered from load balancers
+	// should listen to an even from the asg lifecycle hook instead of the node drain event
 
 	// record the lifecycle action heartbeat
 	if os.Getenv("DEBUG") == "" {

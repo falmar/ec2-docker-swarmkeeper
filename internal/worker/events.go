@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	NodeShutdownEvent queue.EventName = "node.shutdown"
-	NodeRemoveEvent   queue.EventName = "node.remove"
+	NodeDrainEvent  queue.EventName = "node.drain"
+	NodeRemoveEvent queue.EventName = "node.remove"
 )
 
-type NodeShutdownPayload struct {
+type NodeDrainPayload struct {
 	// Docker
 	NodeID string `json:"node_id"`
 	Reason string `json:"reason"`

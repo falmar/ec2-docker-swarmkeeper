@@ -37,7 +37,7 @@ func NewSQSQueue(cfg *SQSConfig) Queue {
 }
 
 // Push pushes an event to the queue
-// delay is in seconds
+// delay is in seconds (is not supported for FIFO queues)
 func (q *sqsQueue) Push(ctx context.Context, event *Event, delay int64) error {
 	out, err := q.sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
 		MessageBody:  aws.String(string(event.Data)),
@@ -115,11 +115,11 @@ func (q *sqsQueue) Pop(ctx context.Context, size int64) ([]*Event, error) {
 	return events, nil
 }
 
-func (q *sqsQueue) Retry(ctx context.Context, event *Event) error {
+func (q *sqsQueue) Retry(ctx context.Context, event *Event, delay int64) error {
 	_, err := q.sqsClient.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{
 		QueueUrl:          aws.String(q.queueURL),
 		ReceiptHandle:     aws.String(event.sqsReceiptHandle),
-		VisibilityTimeout: 0,
+		VisibilityTimeout: int32(delay),
 	})
 	if err != nil {
 		return err
